@@ -1,10 +1,8 @@
 ﻿using EmmyLua.CodeAnalysis.Syntax.Tree;
-using EmmyLua.CodeAnalysis.Syntax.Tree.Green;
 
 namespace EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
 
-public class LuaCommentSyntax(GreenNode greenNode, LuaSyntaxTree tree, LuaSyntaxElement? parent, int startOffset)
-    : LuaSyntaxNode(greenNode, tree, parent, startOffset)
+public class LuaCommentSyntax(int index, LuaSyntaxTree tree) : LuaSyntaxNode(index, tree)
 {
     public bool IsDeprecated => FirstChild<LuaDocTagDeprecatedSyntax>() != null;
 
@@ -13,9 +11,9 @@ public class LuaCommentSyntax(GreenNode greenNode, LuaSyntaxTree tree, LuaSyntax
     // TODO
     // public bool IsOverride => FirstChildToken(LuaTokenKind.TkTagOverride) != null;
 
-    public IEnumerable<LuaDocTagSyntax> DocList => ChildNodes<LuaDocTagSyntax>();
+    public IEnumerable<LuaDocTagSyntax> DocList => ChildrenElement<LuaDocTagSyntax>();
 
-    public IEnumerable<LuaDescriptionSyntax> Descriptions => ChildNodes<LuaDescriptionSyntax>();
+    public IEnumerable<LuaDescriptionSyntax> Descriptions => ChildrenElement<LuaDescriptionSyntax>();
 
     public string CommentText => string.Join("\n\n", Descriptions.Select(it => it.CommentText));
 

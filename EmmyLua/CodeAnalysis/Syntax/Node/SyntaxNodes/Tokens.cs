@@ -2,19 +2,14 @@
 using EmmyLua.CodeAnalysis.Document.Version;
 using EmmyLua.CodeAnalysis.Kind;
 using EmmyLua.CodeAnalysis.Syntax.Tree;
-using EmmyLua.CodeAnalysis.Syntax.Tree.Green;
+
 
 namespace EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
 
-public class LuaStringToken(
-    string value,
-    GreenNode greenNode,
-    LuaSyntaxTree tree,
-    LuaSyntaxElement? parent,
-    int startOffset)
-    : LuaSyntaxToken(greenNode, tree, parent, startOffset)
+public class LuaStringToken(int index, LuaSyntaxTree tree)
+    : LuaSyntaxToken(index, tree)
 {
-    public string Value { get; } = value;
+    public string Value => Tree.GetStringTokenValue(ElementId);
 
     public override string ToString()
     {
@@ -22,8 +17,7 @@ public class LuaStringToken(
     }
 }
 
-public class LuaNumberToken(GreenNode greenNode, LuaSyntaxTree tree, LuaSyntaxElement? parent, int startOffset)
-    : LuaSyntaxToken(greenNode, tree, parent, startOffset)
+public class LuaNumberToken(int index, LuaSyntaxTree tree) : LuaSyntaxToken(index, tree)
 {
     public bool IsInteger => Kind == LuaTokenKind.TkInt;
 
@@ -37,18 +31,11 @@ public class LuaNumberToken(GreenNode greenNode, LuaSyntaxTree tree, LuaSyntaxEl
     }
 }
 
-public class LuaIntegerToken(
-    long value,
-    string suffix,
-    GreenNode greenNode,
-    LuaSyntaxTree tree,
-    LuaSyntaxElement? parent,
-    int startOffset)
-    : LuaNumberToken(greenNode, tree, parent, startOffset)
+public class LuaIntegerToken(int index, LuaSyntaxTree tree) : LuaNumberToken(index, tree)
 {
-    public long Value { get; } = value;
+    public long Value => Tree.GetIntegerTokenValue(ElementId).Item1;
 
-    public string Suffix { get; } = suffix;
+    public string Suffix => Tree.GetIntegerTokenValue(ElementId).Item2;
 
     public override string ToString()
     {
@@ -56,15 +43,9 @@ public class LuaIntegerToken(
     }
 }
 
-public class LuaFloatToken(
-    double value,
-    GreenNode greenNode,
-    LuaSyntaxTree tree,
-    LuaSyntaxElement? parent,
-    int startOffset)
-    : LuaNumberToken(greenNode, tree, parent, startOffset)
+public class LuaFloatToken(int index, LuaSyntaxTree tree) : LuaNumberToken(index, tree)
 {
-    public double Value { get; } = value;
+    public double Value => Tree.GetNumberTokenValue(ElementId);
 
     public override string ToString()
     {
@@ -72,58 +53,35 @@ public class LuaFloatToken(
     }
 }
 
-public class LuaComplexToken(
-    string value,
-    GreenNode greenNode,
-    LuaSyntaxTree tree,
-    LuaSyntaxElement? parent,
-    int startOffset)
-    : LuaNumberToken(greenNode, tree, parent, startOffset)
+public class LuaComplexToken(int index, LuaSyntaxTree tree) : LuaNumberToken(index, tree)
 {
-    public string Value { get; } = value;
+    public string Value => Text.ToString();
 
     public override string ToString()
     {
-        return $"{Value}i";
+        return Value;
     }
 }
 
-public class LuaNilToken(GreenNode greenNode, LuaSyntaxTree tree, LuaSyntaxElement? parent, int startOffset)
-    : LuaSyntaxToken(greenNode, tree, parent, startOffset);
+public class LuaNilToken(int index, LuaSyntaxTree tree) : LuaSyntaxToken(index, tree);
 
-public class LuaBoolToken(GreenNode greenNode, LuaSyntaxTree tree, LuaSyntaxElement? parent, int startOffset)
-    : LuaSyntaxToken(greenNode, tree, parent, startOffset)
+public class LuaBoolToken(int index, LuaSyntaxTree tree) : LuaSyntaxToken(index, tree)
 {
     public bool Value => Text == "true";
 }
 
-public class LuaDotsToken(GreenNode greenNode, LuaSyntaxTree tree, LuaSyntaxElement? parent, int startOffset)
-    : LuaSyntaxToken(greenNode, tree, parent, startOffset);
+public class LuaDotsToken(int index, LuaSyntaxTree tree) : LuaSyntaxToken(index, tree);
 
-public class LuaNameToken(GreenNode greenNode, LuaSyntaxTree tree, LuaSyntaxElement? parent, int startOffset)
-    : LuaSyntaxToken(greenNode, tree, parent, startOffset);
+public class LuaNameToken(int index, LuaSyntaxTree tree) : LuaSyntaxToken(index, tree);
 
-public class LuaWhitespaceToken(GreenNode greenNode, LuaSyntaxTree tree, LuaSyntaxElement? parent, int startOffset)
-    : LuaSyntaxToken(greenNode, tree, parent, startOffset);
+public class LuaWhitespaceToken(int index, LuaSyntaxTree tree) : LuaSyntaxToken(index, tree);
 
-public class LuaVersionNumberToken(
-    VersionNumber version,
-    GreenNode greenNode,
-    LuaSyntaxTree tree,
-    LuaSyntaxElement? parent,
-    int startOffset)
-    : LuaSyntaxToken(greenNode, tree, parent, startOffset)
+public class LuaVersionNumberToken(int index, LuaSyntaxTree tree) : LuaSyntaxToken(index, tree)
 {
-    public VersionNumber Version { get; } = version;
+    public VersionNumber Version => Tree.GetVersionNumber(ElementId);
 }
 
-public class LuaTemplateTypeToken(
-    string name,
-    GreenNode greenNode,
-    LuaSyntaxTree tree,
-    LuaSyntaxElement? parent,
-    int startOffset)
-    : LuaSyntaxToken(greenNode, tree, parent, startOffset)
+public class LuaTemplateTypeToken(int index, LuaSyntaxTree tree) : LuaSyntaxToken(index, tree)
 {
-    public string Name { get; } = name;
+    public string Name => Tree.GetStringTokenValue(ElementId);
 }

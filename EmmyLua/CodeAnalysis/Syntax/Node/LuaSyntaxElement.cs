@@ -4,25 +4,29 @@ using EmmyLua.CodeAnalysis.Document;
 using EmmyLua.CodeAnalysis.Kind;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
 using EmmyLua.CodeAnalysis.Syntax.Tree;
-using EmmyLua.CodeAnalysis.Syntax.Tree.Green;
 using EmmyLua.CodeAnalysis.Syntax.Walker;
 
 namespace EmmyLua.CodeAnalysis.Syntax.Node;
 
-public abstract class LuaSyntaxElement(GreenNode green, LuaSyntaxTree tree, LuaSyntaxElement? parent, int startOffset)
+public abstract class LuaSyntaxElement(int index, LuaSyntaxTree tree)
     : IEquatable<LuaSyntaxElement>
 {
-    protected int RawKind { get; } = green.RawKind;
-
-    private int ParentIndex { get; } = parent?.ElementId ?? -1;
-
-    public int ElementId { get; internal set; }
+    // ReSharper disable once MemberCanBePrivate.Global
+    public int ElementId { get; } = index;
 
     public LuaSyntaxTree Tree { get; } = tree;
 
+    protected int RawKind => Tree.GetRawKind(ElementId);
+
+    protected int ParentIndex => Tree.GetParent(ElementId);
+
+    protected int ChildStartIndex => Tree.GetChildStart(ElementId);
+
+    protected int ChildFinishIndex => Tree.GetChildEnd(ElementId);
+
     public LuaDocumentId DocumentId => Tree.Document.Id;
 
-    public SourceRange Range { get; } = new(startOffset, green.Length);
+    public SourceRange Range => Tree.GetSourceRange(ElementId);
 
     public LuaSyntaxNode? Parent => Tree.GetElement(ParentIndex) as LuaSyntaxNode;
 
@@ -32,13 +36,54 @@ public abstract class LuaSyntaxElement(GreenNode green, LuaSyntaxTree tree, LuaS
 
     public int Position => Range.StartOffset;
 
-    protected abstract IEnumerable<LuaSyntaxElement> ChildrenElements { get; }
+    protected IEnumerable<LuaSyntaxElement> ChildrenElements
+    {
+        get
+        {
+            var start = ChildStartIndex;
+            if (start == -1)
+            {
+                yield break;
+            }
 
-    public IEnumerable<LuaSyntaxNode> ChildrenNode => ChildrenElements.OfType<LuaSyntaxNode>();
+            var finish = ChildFinishIndex;
+            for (var i = start; i <= finish; i++)
+            {
+                var element = Tree.GetElement(i);
+                if (element is not null)
+                {
+                    yield return element;
+                }
+            }
+        }
+    }
+
+    public IEnumerable<LuaSyntaxNode> ChildrenNode
+    {
+        get
+        {
+            var start = ChildStartIndex;
+            if (start == -1)
+            {
+                yield break;
+            }
+
+            var finish = ChildFinishIndex;
+            for (var i = start; i <= finish; i++)
+            {
+                if (Tree.IsNode(i))
+                {
+                    var element = Tree.GetElement(i);
+                    if (element is not null)
+                    {
+                        yield return (element as LuaSyntaxNode)!;
+                    }
+                }
+            }
+        }
+    }
 
     public IEnumerable<LuaSyntaxElement> ChildrenWithTokens => ChildrenElements;
-
-    public abstract void AddChild(LuaSyntaxElement child);
 
     // 遍历所有后代, 包括自己
     public abstract IEnumerable<LuaSyntaxElement> DescendantsAndSelf { get; }
@@ -106,7 +151,6 @@ public abstract class LuaSyntaxElement(GreenNode green, LuaSyntaxTree tree, LuaS
         }
     }
 
-
     public T? FirstChild<T>() where T : LuaSyntaxElement
     {
         return ChildrenElements.OfType<T>().FirstOrDefault();
@@ -114,12 +158,12 @@ public abstract class LuaSyntaxElement(GreenNode green, LuaSyntaxTree tree, LuaS
 
     public LuaSyntaxToken? FirstChildToken(LuaTokenKind kind)
     {
-        return ChildrenElements.OfType<LuaSyntaxToken>().FirstOrDefault(it => it.Kind == kind);
+        return FirstChildToken(it => it == kind);
     }
 
     public LuaSyntaxToken? FirstChildToken()
     {
-        return ChildrenElements.OfType<LuaSyntaxToken>().FirstOrDefault();
+        return FirstChildToken(it => it != LuaTokenKind.None);
     }
 
     public LuaSyntaxToken? FirstChildToken(Func<LuaTokenKind, bool> predicate)
@@ -127,7 +171,7 @@ public abstract class LuaSyntaxElement(GreenNode green, LuaSyntaxTree tree, LuaS
         return ChildrenElements.OfType<LuaSyntaxToken>().FirstOrDefault(it => predicate(it.Kind));
     }
 
-    public IEnumerable<T> ChildNodes<T>() where T : LuaSyntaxElement => ChildrenElements.OfType<T>();
+    public IEnumerable<T> ChildrenElement<T>() where T : LuaSyntaxElement => ChildrenElements.OfType<T>();
 
     public IEnumerable<T> ChildNodesBeforeToken<T>(LuaTokenKind kind) where T : LuaSyntaxElement
     {
@@ -182,11 +226,22 @@ public abstract class LuaSyntaxElement(GreenNode green, LuaSyntaxTree tree, LuaS
 
     public IEnumerable<LuaSyntaxToken> ChildTokens(LuaTokenKind kind)
     {
-        foreach (var child in ChildrenElements)
+        var start = ChildStartIndex;
+        if (start == -1)
         {
-            if (child is LuaSyntaxToken token && token.Kind == kind)
+            yield break;
+        }
+
+        var finish = ChildFinishIndex;
+        for (var i = start; i <= finish; i++)
+        {
+            if (Tree.GetTokenKind(i) == kind)
             {
-                yield return token;
+                var element = Tree.GetElement(i);
+                if (element is not null)
+                {
+                    yield return (element as LuaSyntaxToken)!;
+                }
             }
         }
     }
