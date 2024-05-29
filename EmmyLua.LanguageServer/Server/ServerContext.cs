@@ -226,7 +226,7 @@ public class ServerContext(ILanguageServerFacade server)
 
     public async Task UpdateDocumentAsync(string uri, string text, CancellationToken cancellationToken)
     {
-        await Task.Delay(100, cancellationToken);
+        await Task.Delay(10, cancellationToken);
         if (cancellationToken.IsCancellationRequested)
         {
             return;
@@ -328,7 +328,7 @@ public class ServerContext(ILanguageServerFacade server)
 
     private async Task PushDocumentDiagnosticsAsync(LuaDocumentId documentId, CancellationToken cancellationToken)
     {
-        await Task.Delay(1000, cancellationToken);
+        await Task.Delay(100, cancellationToken);
         if (cancellationToken.IsCancellationRequested)
         {
             return;
