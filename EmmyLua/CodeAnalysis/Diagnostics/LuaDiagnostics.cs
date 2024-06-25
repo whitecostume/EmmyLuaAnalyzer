@@ -1,5 +1,5 @@
 ﻿using EmmyLua.CodeAnalysis.Compilation;
-using EmmyLua.CodeAnalysis.Compilation.Infer;
+using EmmyLua.CodeAnalysis.Compilation.Search;
 using EmmyLua.CodeAnalysis.Diagnostics.Checkers;
 using EmmyLua.CodeAnalysis.Document;
 
@@ -13,7 +13,12 @@ public class LuaDiagnostics(LuaCompilation compilation)
         new UndefinedGlobalChecker(compilation),
         new TypeChecker(compilation),
         new DeprecatedChecker(compilation),
-        new VisibilityChecker(compilation)
+        new VisibilityChecker(compilation),
+        new CallChecker(compilation),
+        new DisableGlobalDefine(compilation),
+        new ReadOnlyChecker(compilation),
+        new TypeNotFoundChecker(compilation),
+        new UndefinedFieldChecker(compilation)
     ];
 
     public LuaCompilation Compilation { get; } = compilation;
@@ -59,7 +64,13 @@ public class LuaDiagnostics(LuaCompilation compilation)
 
     private bool CanCheckCode(LuaDocumentId documentId, DiagnosticCode code)
     {
-        var shouldCheck = !Config.WorkspaceDisabledCodes.Contains(code);
+        var shouldCheck = DiagnosticCodeHelper.IsCodeDefaultEnable(code) || Config.WorkspaceEnabledCodes.Contains(code);
+        if (!shouldCheck)
+        {
+            return false;
+        }
+
+        shouldCheck = !Config.WorkspaceDisabledCodes.Contains(code);
         if (Disables.TryGetValue(documentId, out var disables))
         {
             if (disables.Contains(code))

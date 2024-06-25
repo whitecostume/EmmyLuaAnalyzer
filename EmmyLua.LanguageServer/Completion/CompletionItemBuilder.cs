@@ -1,6 +1,7 @@
 ﻿using System.Text;
+using EmmyLua.CodeAnalysis.Common;
 using EmmyLua.CodeAnalysis.Compilation.Declaration;
-using EmmyLua.CodeAnalysis.Compilation.Infer;
+using EmmyLua.CodeAnalysis.Compilation.Search;
 using EmmyLua.CodeAnalysis.Compilation.Type;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
 using OmniSharp.Extensions.LanguageServer.Protocol.Models;
@@ -45,26 +46,29 @@ public class CompletionItemBuilder(string label, LuaType type, CompleteContext c
         return this;
     }
 
-    public CompletionItemBuilder WithCheckDeclaration(LuaDeclaration declaration)
+    public CompletionItemBuilder WithCheckDeclaration(IDeclaration declaration)
     {
         if (declaration.IsDeprecated)
         {
             IsDeprecated = true;
         }
 
-        if (declaration.RequiredVersions is not null)
+        if (declaration is LuaDeclaration luaDeclaration)
         {
-            var feature = completeContext.ServerContext.LuaWorkspace.Features;
-            var languageLevel = feature.Language.LanguageLevel;
-            if (!declaration.ValidateLuaVersion(languageLevel))
+            if (luaDeclaration.RequiredVersions is not null)
             {
-                Disable = true;
-            }
+                var feature = CompleteContext.ServerContext.LuaWorkspace.Features;
+                var languageLevel = feature.Language.LanguageLevel;
+                if (!luaDeclaration.ValidateLuaVersion(languageLevel))
+                {
+                    Disable = true;
+                }
 
-            var frameworkVersion = feature.FrameworkVersions;
-            if (!Disable && !declaration.ValidateFrameworkVersions(frameworkVersion))
-            {
-                Disable = true;
+                var frameworkVersion = feature.FrameworkVersions;
+                if (!Disable && !luaDeclaration.ValidateFrameworkVersions(frameworkVersion))
+                {
+                    Disable = true;
+                }
             }
         }
 
@@ -143,8 +147,7 @@ public class CompletionItemBuilder(string label, LuaType type, CompleteContext c
                         Kind = Kind,
                         LabelDetails = new CompletionItemLabelDetails()
                         {
-                            Description =
-                                CompleteContext.SemanticModel.RenderBuilder.RenderType(Type,
+                            Description = CompleteContext.RenderBuilder.RenderType(Type,
                                     CompleteContext.RenderFeature),
                         },
                         InsertText = InsertText,
@@ -259,7 +262,7 @@ public class CompletionItemBuilder(string label, LuaType type, CompleteContext c
             {
                 Detail = RenderSignatureParams(signature, colonDefine),
                 Description =
-                    CompleteContext.SemanticModel.RenderBuilder.RenderType(signature.ReturnType, CompleteContext.RenderFeature)
+                    CompleteContext.RenderBuilder.RenderType(signature.ReturnType, CompleteContext.RenderFeature)
             },
             Data = Data,
             Command = Command,

@@ -1,5 +1,5 @@
-﻿using EmmyLua.CodeAnalysis.Compilation;
-using EmmyLua.CodeAnalysis.Compilation.Declaration;
+﻿using EmmyLua.CodeAnalysis.Common;
+using EmmyLua.CodeAnalysis.Compilation;
 using EmmyLua.CodeAnalysis.Document;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
 
@@ -61,7 +61,7 @@ public class DeprecatedChecker(LuaCompilation compilation)
         }
     }
 
-    private void CheckDeprecated(DiagnosticContext context, LuaDeclaration declaration, SourceRange range)
+    private void CheckDeprecated(DiagnosticContext context, IDeclaration declaration, SourceRange range)
     {
         if (declaration.IsDeprecated)
         {

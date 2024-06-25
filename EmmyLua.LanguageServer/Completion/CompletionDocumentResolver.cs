@@ -1,8 +1,7 @@
-﻿using EmmyLua.CodeAnalysis.Compilation.Infer;
-using EmmyLua.CodeAnalysis.Compilation.Semantic.Render;
-using EmmyLua.CodeAnalysis.Document;
+﻿using EmmyLua.CodeAnalysis.Document;
 using EmmyLua.CodeAnalysis.Syntax.Node;
-using EmmyLua.CodeAnalysis.Workspace;
+using EmmyLua.LanguageServer.Server;
+using EmmyLua.LanguageServer.Server.Render;
 using Newtonsoft.Json.Linq;
 using OmniSharp.Extensions.LanguageServer.Protocol.Models;
 
@@ -10,26 +9,16 @@ namespace EmmyLua.LanguageServer.Completion;
 
 public class CompletionDocumentResolver
 {
-    private LuaWorkspace Workspace { get; }
-    private SearchContext Context { get; }
-
-    private LuaRenderFeature RenderFeature { get; } = new(
-        true,
-        false,
-        false,
-        100
-    );
-
-    private LuaRenderBuilder RenderBuilder { get; }
-
-    public CompletionDocumentResolver(LuaWorkspace workspace)
+    private LuaRenderFeature RenderFeature { get; } = new ()
     {
-        Workspace = workspace;
-        Context = new SearchContext(workspace.Compilation, new SearchContextFeatures());
-        RenderBuilder = new LuaRenderBuilder(Context);
-    }
-
-    public CompletionItem Resolve(CompletionItem completionItem)
+        ExpandAlias = true,
+        ShowTypeLink = false,
+        InHint = false,
+        MaxStringPreviewLength = 100,
+        InHover = true
+    };
+    
+    public CompletionItem Resolve(CompletionItem completionItem, ServerContext context)
     {
         switch (completionItem.Kind)
         {
@@ -37,30 +26,29 @@ public class CompletionDocumentResolver
             case CompletionItemKind.File:
             case CompletionItemKind.Field:
             {
-                return ModuleResolve(completionItem);
+                return ModuleResolve(completionItem, context);
             }
             default:
             {
-                return GeneralResolve(completionItem);
+                return GeneralResolve(completionItem, context);
             }
         }
     }
 
-    private CompletionItem ModuleResolve(CompletionItem completionItem)
+    private CompletionItem ModuleResolve(CompletionItem completionItem, ServerContext context)
     {
         if (completionItem.Data is not null && completionItem.Data.Type == JTokenType.String)
         {
             var id = new LuaDocumentId((int) completionItem.Data);
-            var document = Workspace.GetDocument(id);
-            if (document is not null)
+            if (context.GetSemanticModel(id) is {} semanticModel)
             {
-                ;
+                var renderBuilder = new LuaRenderBuilder(semanticModel.Context);
                 completionItem = completionItem with
                 {
                     Documentation = new MarkupContent()
                     {
                         Kind = MarkupKind.Markdown,
-                        Value = RenderBuilder.RenderModule(document, RenderFeature)
+                        Value = renderBuilder.RenderModule(semanticModel.Document, RenderFeature)
                     }
                 };
             }
@@ -69,27 +57,31 @@ public class CompletionDocumentResolver
         return completionItem;
     }
 
-    private CompletionItem GeneralResolve(CompletionItem completionItem)
+    private CompletionItem GeneralResolve(CompletionItem completionItem, ServerContext context)
     {
         if (completionItem.Data is not null)
         {
             if (completionItem.Data.Type == JTokenType.String && (string?) completionItem.Data is { } strPtr)
             {
                 var ptr = LuaElementPtr<LuaSyntaxNode>.From(strPtr);
-                var node = ptr.ToNode(Context);
+                var node = ptr.ToNode(context.LuaWorkspace);
                 if (node is null)
                 {
                     return completionItem;
                 }
-
-                return completionItem with
+                
+                if (context.GetSemanticModel(ptr.DocumentId) is {} semanticModel)
                 {
-                    Documentation = new MarkupContent()
+                    var renderBuilder = new LuaRenderBuilder(semanticModel.Context);
+                    return completionItem with
                     {
-                        Kind = MarkupKind.Markdown,
-                        Value = RenderBuilder.Render(node, RenderFeature)
-                    }
-                };
+                        Documentation = new MarkupContent()
+                        {
+                            Kind = MarkupKind.Markdown,
+                            Value = renderBuilder.Render(node, RenderFeature)
+                        }
+                    };
+                }
             }
         }
 

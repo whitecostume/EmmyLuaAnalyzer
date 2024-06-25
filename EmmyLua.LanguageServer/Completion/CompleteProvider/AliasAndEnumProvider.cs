@@ -1,6 +1,6 @@
-﻿using EmmyLua.CodeAnalysis.Compilation.Type;
-using EmmyLua.CodeAnalysis.Compilation.Type.DetailType;
-using EmmyLua.CodeAnalysis.Kind;
+﻿using EmmyLua.CodeAnalysis.Compilation.Declaration;
+using EmmyLua.CodeAnalysis.Compilation.Type;
+using EmmyLua.CodeAnalysis.Syntax.Kind;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
 using OmniSharp.Extensions.LanguageServer.Protocol.Models;
 
@@ -65,17 +65,17 @@ public class AliasAndEnumProvider : ICompleteProviderBase
             if (activeParam >= 0 && activeParam < methodType.MainSignature.Parameters.Count)
             {
                 var param = methodType.MainSignature.Parameters[activeParam];
-                var paramType = param.Info.DeclarationType;
+                var paramType = param.Type;
                 if (paramType is LuaNamedType namedType)
                 {
-                    var detailType = namedType.GetDetailType(context.SemanticModel.Context);
-                    if (detailType.IsAlias && detailType is AliasDetailType aliasDetailType)
+                    var namedTypeKind = namedType.GetTypeKind(context.SemanticModel.Context);
+                    if (namedTypeKind == NamedTypeKind.Alias)
                     {
-                        AddAliasParamCompletion(aliasDetailType, context);
+                        AddAliasParamCompletion(namedType, context);
                     }
-                    else if (detailType.IsEnum && detailType is EnumDetailType enumDetailType)
+                    else if (namedTypeKind == NamedTypeKind.Enum)
                     {
-                        AddEnumParamCompletion(enumDetailType, context);
+                        AddEnumParamCompletion(namedType, context);
                     }
                 }
                 else if (paramType is LuaAggregateType aggregateType)
@@ -90,29 +90,30 @@ public class AliasAndEnumProvider : ICompleteProviderBase
         });
     }
 
-    private void AddAliasParamCompletion(AliasDetailType aliasDetailType, CompleteContext context)
+    private void AddAliasParamCompletion(LuaNamedType namedType, CompleteContext context)
     {
-        if (aliasDetailType.OriginType is LuaAggregateType aggregateType)
+        var originType = context.SemanticModel.Compilation.Db
+            .QueryAliasOriginTypes(namedType.Name);
+        if (originType is LuaAggregateType aggregateType)
         {
             AddAggregateTypeCompletion(aggregateType, context);
         }
-        else if (aliasDetailType.OriginType is LuaUnionType unionType)
+        else if (originType is LuaUnionType unionType)
         {
             AddUnionTypeCompletion(unionType, context);
         }
     }
 
-    private void AddEnumParamCompletion(EnumDetailType enumDetailType, CompleteContext context)
+    private void AddEnumParamCompletion(LuaNamedType namedType, CompleteContext context)
     {
-        var enumName = enumDetailType.Name;
         var members = context.SemanticModel.Compilation.Db
-            .GetMembers(enumName);
+            .QueryMembers(namedType);
 
         foreach (var field in members)
         {
             context.Add(new CompletionItem
             {
-                Label = $"{enumName}.{field.Name}",
+                Label = $"{namedType.Name}.{field.Name}",
                 Kind = CompletionItemKind.EnumMember,
             });
         }
@@ -120,7 +121,7 @@ public class AliasAndEnumProvider : ICompleteProviderBase
 
     private void AddAggregateTypeCompletion(LuaAggregateType aggregateType, CompleteContext context)
     {
-        foreach (var declaration in aggregateType.Declarations)
+        foreach (var declaration in aggregateType.Declarations.OfType<LuaDeclaration>())
         {
             if (declaration.Info.Ptr.ToNode(context.SemanticModel.Context) is LuaDocLiteralTypeSyntax literalType)
             {

@@ -2,7 +2,7 @@
 using EmmyLua.CodeAnalysis.Compile.Parser;
 using EmmyLua.CodeAnalysis.Diagnostics;
 using EmmyLua.CodeAnalysis.Document;
-using EmmyLua.CodeAnalysis.Kind;
+using EmmyLua.CodeAnalysis.Syntax.Kind;
 
 namespace EmmyLua.CodeAnalysis.Syntax.Tree.Green;
 
@@ -15,15 +15,15 @@ public class LuaGreenTreeBuilder(LuaParser parser)
     private List<Diagnostic> Diagnostics { get; } = [];
 
     // 多返回值
-    public (GreenNode, List<Diagnostic>) Build()
+    public (GreenNode, List<Diagnostic>, int) Build()
     {
         Parser.Parse();
         Diagnostics.AddRange(Parser.Lexer.Diagnostics);
-        var root = BuildTree();
-        return (root, Diagnostics);
+        var (root, count) = BuildTree();
+        return (root, Diagnostics, count);
     }
 
-    private GreenNode BuildTree()
+    private (GreenNode, int) BuildTree()
     {
         StartNode(LuaSyntaxKind.Source);
 

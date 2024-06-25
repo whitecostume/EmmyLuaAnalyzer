@@ -1,4 +1,4 @@
-﻿using EmmyLua.CodeAnalysis.Kind;
+﻿using EmmyLua.CodeAnalysis.Syntax.Kind;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
 using EmmyLua.LanguageServer.Completion.CompletionData;
 using EmmyLua.LanguageServer.Util;
@@ -15,12 +15,12 @@ public class KeywordsProvider : ICompleteProviderBase
             return;
         }
 
-        if (nameExpr.Parent?.Parent is not LuaBlockSyntax)
+        if (nameExpr.Parent?.Parent is LuaBlockSyntax)
         {
-            return;
+            context.AddRange(KeySnippets.StatKeyWords);
         }
 
-        context.AddRange(KeySnippets.Keywords);
+        context.AddRange(KeySnippets.ExprKeywords);
         ContinueCompletion(context);
     }
 

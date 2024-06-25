@@ -30,7 +30,20 @@ public enum DiagnosticCode
     [EnumMember(Value = "deprecated")]
     Deprecated,
     [EnumMember(Value = "access-private-member")]
-    AccessPrivateMember
+    AccessPrivateMember,
+    [EnumMember(Value = "access-protected-member")]
+    AccessProtectedMember,
+    [EnumMember(Value = "access-package-member")]
+    AccessPackageMember,
+    [EnumMember(Value = "no-discard")]
+    NoDiscard,
+    [EnumMember(Value = "disable-global-define")]
+    DisableGlobalDefine,
+    [EnumMember(Value = "undefined-field")]
+    UndefinedField,
+    [EnumMember(Value = "local-const-reassign")]
+    LocalConstReassign,
+
 }
 // @formatter:on
 public static class DiagnosticCodeHelper
@@ -60,5 +73,31 @@ public static class DiagnosticCodeHelper
     public static DiagnosticCode GetCode(string name)
     {
         return CodeCache.GetValueOrDefault(name, DiagnosticCode.None);
+    }
+
+    public static bool IsCodeDefaultEnable(DiagnosticCode code)
+    {
+        return code switch
+        {
+            DiagnosticCode.SyntaxError => true,
+            DiagnosticCode.TypeNotFound => false,
+            DiagnosticCode.MissingReturn => true,
+            DiagnosticCode.TypeNotMatch => true,
+            DiagnosticCode.MissingParameter => true,
+            DiagnosticCode.InjectFieldFail => true,
+            DiagnosticCode.UnreachableCode => true,
+            DiagnosticCode.Unused => true,
+            DiagnosticCode.UndefinedGlobal => true,
+            DiagnosticCode.NeedImport => true,
+            DiagnosticCode.Deprecated => true,
+            DiagnosticCode.AccessPrivateMember => true,
+            DiagnosticCode.AccessPackageMember => true,
+            DiagnosticCode.AccessProtectedMember => true,
+            DiagnosticCode.NoDiscard => true,
+            DiagnosticCode.DisableGlobalDefine => false,
+            DiagnosticCode.UndefinedField => false,
+            DiagnosticCode.LocalConstReassign => true,
+            _ => false
+        };
     }
 }

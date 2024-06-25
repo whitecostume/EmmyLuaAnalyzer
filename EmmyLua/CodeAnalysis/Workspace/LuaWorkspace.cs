@@ -1,4 +1,5 @@
-﻿using EmmyLua.CodeAnalysis.Compilation;
+﻿using EmmyLua.CodeAnalysis.Common;
+using EmmyLua.CodeAnalysis.Compilation;
 using EmmyLua.CodeAnalysis.Document;
 using EmmyLua.CodeAnalysis.Workspace.Module;
 
@@ -307,5 +308,10 @@ public class LuaWorkspace
                 }
             }
         }
+    }
+
+    public IDocument? GetDocument(int id)
+    {
+        return GetDocument(new LuaDocumentId(id));
     }
 }

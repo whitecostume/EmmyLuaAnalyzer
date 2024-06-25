@@ -1,5 +1,5 @@
 ﻿using EmmyLua.CodeAnalysis.Document;
-using EmmyLua.CodeAnalysis.Kind;
+using EmmyLua.CodeAnalysis.Syntax.Kind;
 
 namespace EmmyLua.CodeAnalysis.Syntax.Tree.Green;
 
@@ -10,6 +10,8 @@ public class GreenNodeBuilder
         public int FirstChild { get; } = position;
         public LuaSyntaxKind Kind { get; } = kind;
     }
+
+    private int ElementCount { get; set; } = 0;
 
     private Stack<ParentInfo> Parents { get; } = new();
 
@@ -79,7 +81,7 @@ public class GreenNodeBuilder
         }
 
         Children.RemoveRange(childStart, childEnd - childStart + 1);
-        var green = new GreenNode(parentInfo.Kind, length, nodeChildren);
+        var green = CreateGreenNode(parentInfo.Kind, length, nodeChildren);
         if (childEnd + 1 < childCount)
         {
             Children.Insert(childStart, green);
@@ -90,13 +92,25 @@ public class GreenNodeBuilder
         }
     }
 
-    public void EatToken(LuaTokenKind kind, SourceRange range)
+    private GreenNode CreateGreenNode(LuaSyntaxKind kind, int length, List<GreenNode> children)
     {
-        Children.Add(new GreenNode(kind, range.Length));
+        ElementCount++;
+        return new GreenNode(kind, length, children);
     }
 
-    public GreenNode Finish()
+    private GreenNode CreateGreenToken(LuaTokenKind kind, SourceRange range)
     {
-        return Children[0];
+        ElementCount++;
+        return new GreenNode(kind, range.Length);
+    }
+
+    public void EatToken(LuaTokenKind kind, SourceRange range)
+    {
+        Children.Add(CreateGreenToken(kind, range));
+    }
+
+    public (GreenNode, int) Finish()
+    {
+        return (Children[0], ElementCount);
     }
 }

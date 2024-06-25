@@ -32,6 +32,8 @@ public class SettingManager
 
     private System.Timers.Timer? _timer;
 
+    public HashSet<string> WorkspaceExtensions { get; set; } = new();
+
     private void OnChanged(object sender, FileSystemEventArgs e)
     {
         if (e.ChangeType is WatcherChangeTypes.Changed or WatcherChangeTypes.Created)
@@ -139,7 +141,7 @@ public class SettingManager
         features.DontIndexMaxFileSize = setting.Workspace.PreloadFileSize;
         features.ThirdPartyRoots.AddRange(setting.Workspace.Library);
         features.WorkspaceRoots.AddRange(setting.Workspace.WorkspaceRoots);
-        features.Language.LanguageLevel = setting.Runtime.Version switch
+        features.Language = new LuaLanguage(setting.Runtime.Version switch
         {
             LuaVersion.Lua51 => LuaLanguageLevel.Lua51,
             LuaVersion.LuaJIT => LuaLanguageLevel.LuaJIT,
@@ -148,9 +150,10 @@ public class SettingManager
             LuaVersion.Lua54 => LuaLanguageLevel.Lua54,
             LuaVersion.LuaLatest => LuaLanguageLevel.LuaLatest,
             _ => LuaLanguageLevel.Lua54
-        };
+        });
         features.DiagnosticConfig.Globals.UnionWith(setting.Diagnostics.Globals);
         features.DiagnosticConfig.WorkspaceDisabledCodes.UnionWith(setting.Diagnostics.Disable);
+        features.DiagnosticConfig.WorkspaceEnabledCodes.UnionWith(setting.Diagnostics.Enables);
         foreach (var globalRegexString in setting.Diagnostics.GlobalsRegex)
         {
             try
@@ -178,7 +181,7 @@ public class SettingManager
             }
         }
 
-        foreach (var extension in setting.Runtime.Extensions)
+        foreach (var extension in setting.Runtime.Extensions.Concat(WorkspaceExtensions))
         {
             if (extension.StartsWith('.'))
             {

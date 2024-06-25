@@ -1,6 +1,6 @@
 using System.Runtime.Serialization;
 using EmmyLua.CodeAnalysis.Diagnostics;
-using EmmyLua.CodeAnalysis.Util.FilenameConverter;
+using EmmyLua.CodeAnalysis.Workspace.Module.FilenameConverter;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 
@@ -16,6 +16,9 @@ public class Setting
 
     [JsonProperty("completion", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
     public Completion Completion { get; set; } = new();
+
+    [JsonProperty("signature", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+    public Signature Signature { get; set; } = new();
 
     [JsonProperty("diagnostics", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
     public Diagnostics Diagnostics { get; set; } = new();
@@ -77,6 +80,9 @@ public class Diagnostics
     [JsonProperty("severity", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore),
      JsonConverter(typeof(DiagnosticSeverityConverter))]
     public Dictionary<DiagnosticCode, DiagnosticSeverity> Severity { get; set; } = [];
+
+    [JsonProperty("enables", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+    public List<DiagnosticCode> Enables { get; set; } = [];
 }
 
 public class DiagnosticSeverityConverter : JsonConverter<Dictionary<DiagnosticCode, DiagnosticSeverity>>
@@ -213,4 +219,10 @@ public class Strict
 
     [JsonProperty("typeCall", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
     public bool TypeCall { get; set; } = true;
+}
+
+public class Signature
+{
+    [JsonProperty("detailSignatureHelper", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+    public bool DetailSignatureHelper { get; set; } = false;
 }

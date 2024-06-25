@@ -36,9 +36,9 @@ public class TableFieldProvider : ICompleteProviderBase
         {
             if (nameSet.Add(member.Name))
             {
-                context.CreateCompletion($"{member.Name} = ", member.Info.DeclarationType)
+                context.CreateCompletion($"{member.Name} = ", member.Type)
                     .WithKind(CompletionItemKind.Property)
-                    .WithData(member.Info.Ptr.Stringify)
+                    .WithData(member.RelationInformation)
                     .WithCheckDeclaration(member)
                     .AddToContext();
             }

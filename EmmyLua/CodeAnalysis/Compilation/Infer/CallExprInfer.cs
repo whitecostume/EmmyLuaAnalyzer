@@ -1,4 +1,5 @@
-﻿using EmmyLua.CodeAnalysis.Compilation.Type;
+﻿using EmmyLua.CodeAnalysis.Compilation.Search;
+using EmmyLua.CodeAnalysis.Compilation.Type;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
 
 namespace EmmyLua.CodeAnalysis.Compilation.Infer;
@@ -19,7 +20,7 @@ public static class CallExprInfer
         var args = callExpr.ArgList?.ArgList.ToList() ?? [];
         context.FindMethodsForType(luaType, luaMethod =>
         {
-            var perfectSig = luaMethod.FindPerfectMatchSignature(callExpr, args, context);
+            var perfectSig = MethodInfer.FindPerfectMatchSignature(luaMethod, callExpr, args, context);
             if (perfectSig.ReturnType is { } retTy)
             {
                 // ReSharper disable once AccessToModifiedClosure
@@ -104,15 +105,7 @@ public static class CallExprInfer
             return multiReturnType;
         }
 
-        LuaType retType = Builtin.Unknown;
-        if (IsLastCallExpr(callExprSyntax))
-        {
-            retType = multiReturnType;
-        }
-        else
-        {
-            multiReturnType.GetElementType(0);
-        }
+        var retType = IsLastCallExpr(callExprSyntax) ? multiReturnType : multiReturnType.GetElementType(0);
 
         return UnwrapReturn(callExprSyntax, context, retType, level + 1);
     }
@@ -138,22 +131,22 @@ public static class CallExprInfer
         if (callExpr.Parent is LuaTableFieldSyntax field)
         {
             var table = field.ParentTable;
-            return ReferenceEquals(table?.FieldList.LastOrDefault(), field);
+            return field.Equals(table?.FieldList.LastOrDefault());
         }
 
         if (callExpr.Parent is LuaLocalStatSyntax localStat)
         {
-            return ReferenceEquals(localStat.ExprList.LastOrDefault(), callExpr);
+            return callExpr.Equals(localStat.ExprList.LastOrDefault());
         }
 
         if (callExpr.Parent is LuaAssignStatSyntax assignStat)
         {
-            return ReferenceEquals(assignStat.ExprList.LastOrDefault(), callExpr);
+            return callExpr.Equals(assignStat.ExprList.LastOrDefault());
         }
 
         if (callExpr.Parent is LuaCallExprSyntax callExpr2)
         {
-            return ReferenceEquals(callExpr2.ArgList?.ArgList.LastOrDefault(), callExpr);
+            return callExpr.Equals(callExpr2.ArgList?.ArgList.LastOrDefault());
         }
 
         return false;

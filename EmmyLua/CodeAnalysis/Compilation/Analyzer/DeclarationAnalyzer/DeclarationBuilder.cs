@@ -1,14 +1,18 @@
-﻿using EmmyLua.CodeAnalysis.Compilation.Declaration;
+﻿using EmmyLua.CodeAnalysis.Common;
+using EmmyLua.CodeAnalysis.Compilation.Declaration;
 using EmmyLua.CodeAnalysis.Compilation.Index;
-using EmmyLua.CodeAnalysis.Compilation.Infer;
+using EmmyLua.CodeAnalysis.Compilation.Reference;
+using EmmyLua.CodeAnalysis.Compilation.Scope;
+using EmmyLua.CodeAnalysis.Compilation.Search;
 using EmmyLua.CodeAnalysis.Compilation.Type;
 using EmmyLua.CodeAnalysis.Document;
 using EmmyLua.CodeAnalysis.Document.Version;
-using EmmyLua.CodeAnalysis.Kind;
+using EmmyLua.CodeAnalysis.Syntax.Kind;
 using EmmyLua.CodeAnalysis.Syntax.Node;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
 using EmmyLua.CodeAnalysis.Syntax.Tree;
 using EmmyLua.CodeAnalysis.Syntax.Walker;
+using LuaVariableRefType = EmmyLua.CodeAnalysis.Compilation.Type.LuaVariableRefType;
 
 namespace EmmyLua.CodeAnalysis.Compilation.Analyzer.DeclarationAnalyzer;
 
@@ -20,17 +24,17 @@ public class DeclarationBuilder : ILuaElementWalker
 
     private Stack<DeclarationScope> _scopeStack = new();
 
-    private Dictionary<long, DeclarationScope> _scopeOwners = new();
-
-    private LuaDeclarationTree _tree;
+    private Dictionary<SyntaxElementId, DeclarationScope> _scopeOwners = new();
 
     private LuaSyntaxTree _syntaxTree;
+
+    private HashSet<SyntaxElementId> _uniqueReferences = new();
 
     private DeclarationAnalyzer Analyzer { get; }
 
     private LuaCompilation Compilation => Analyzer.Compilation;
 
-    private DbManager Db => Compilation.Db;
+    private WorkspaceIndex Db => Compilation.Db;
 
     private AnalyzeContext AnalyzeContext { get; }
 
@@ -38,11 +42,16 @@ public class DeclarationBuilder : ILuaElementWalker
 
     private LuaDocumentId DocumentId { get; }
 
-    public LuaDeclarationTree Build()
+    public LuaDeclarationTree? Build()
     {
         _syntaxTree.SyntaxRoot.Accept(this);
-        _tree.RootScope = _topScope;
-        return _tree;
+
+        if (_topScope is not null)
+        {
+            return new LuaDeclarationTree(_scopeOwners, _topScope);
+        }
+
+        return null;
     }
 
     public DeclarationBuilder(
@@ -52,14 +61,13 @@ public class DeclarationBuilder : ILuaElementWalker
         AnalyzeContext analyzeContext)
     {
         _syntaxTree = tree;
-        _tree = new LuaDeclarationTree(tree, _scopeOwners);
         Analyzer = analyzer;
         DocumentId = documentId;
         AnalyzeContext = analyzeContext;
         Context = new(Analyzer.Compilation, new SearchContextFeatures() { Cache = false });
     }
 
-    private LuaDeclaration? FindDeclaration(LuaNameExprSyntax nameExpr)
+    private LuaDeclaration? FindLocalDeclaration(LuaNameExprSyntax nameExpr)
     {
         return FindScope(nameExpr)?.FindNameDeclaration(nameExpr);
     }
@@ -80,9 +88,20 @@ public class DeclarationBuilder : ILuaElementWalker
         return null;
     }
 
-    private void AddDeclaration(LuaDeclaration luaDeclaration)
+    private void AddDeclaration(int position, LuaDeclaration luaDeclaration)
     {
-        _curScope?.Add(luaDeclaration);
+        _curScope?.Add(new DeclarationNode(position, luaDeclaration));
+    }
+
+    private void AddReference(ReferenceKind kind, LuaDeclaration declaration, LuaSyntaxElement nameElement)
+    {
+        if (!_uniqueReferences.Add(nameElement.UniqueId))
+        {
+            return;
+        }
+
+        var reference = new LuaReference(new(nameElement), kind);
+        Db.AddReference(DocumentId, declaration, reference);
     }
 
     private void AddUnResolved(UnResolved declaration)
@@ -104,22 +123,22 @@ public class DeclarationBuilder : ILuaElementWalker
         {
             case LuaLocalStatSyntax:
             {
-                SetScope(new LocalStatDeclarationScope(_tree, position), element);
+                SetScope(new LocalStatDeclarationScope(position, [], _curScope), element);
                 break;
             }
             case LuaRepeatStatSyntax:
             {
-                SetScope(new RepeatStatDeclarationScope(_tree, position), element);
+                SetScope(new RepeatStatDeclarationScope(position, [], _curScope), element);
                 break;
             }
             case LuaForRangeStatSyntax:
             {
-                SetScope(new ForRangeStatDeclarationScope(_tree, position), element);
+                SetScope(new ForRangeStatDeclarationScope(position, [], _curScope), element);
                 break;
             }
             default:
             {
-                SetScope(new DeclarationScope(_tree, position), element);
+                SetScope(new DeclarationScope(position, [], _curScope), element);
                 break;
             }
         }
@@ -220,7 +239,7 @@ public class DeclarationBuilder : ILuaElementWalker
             }
             case LuaNameExprSyntax nameExpr:
             {
-                IndexNameExpr(nameExpr);
+                AnalyzeNameExpr(nameExpr);
                 break;
             }
             case LuaIndexExprSyntax indexExpr:
@@ -296,17 +315,16 @@ public class DeclarationBuilder : ILuaElementWalker
             {
                 var declaration = new LuaDeclaration(
                     name.RepresentText,
-                    localName.Position,
                     new LocalInfo(
                         new(localName),
-                        luaType,
-                        false,
+                        luaType ?? new LuaVariableRefType(localName.UniqueId),
                         localName.Attribute?.IsConst ?? false,
                         localName.Attribute?.IsClose ?? false
                     ),
                     DeclarationFeature.Local
                 );
-                AddDeclaration(declaration);
+                AddReference(ReferenceKind.Definition, declaration, localName);
+                AddDeclaration(localName.Position, declaration);
                 var unResolveDeclaration =
                     new UnResolvedDeclaration(declaration, relatedExpr, ResolveState.UnResolvedType);
                 AddUnResolved(unResolveDeclaration);
@@ -318,7 +336,6 @@ public class DeclarationBuilder : ILuaElementWalker
                         declaration.Info = info with
                         {
                             DeclarationType = definedType,
-                            IsTypeDefine = true
                         };
                         unResolveDeclaration.IsTypeDeclaration = true;
                     }
@@ -345,7 +362,6 @@ public class DeclarationBuilder : ILuaElementWalker
 
                 var declaration = new LuaDeclaration(
                     name.RepresentText,
-                    param.Position,
                     new ParamInfo(
                         new(param),
                         luaType,
@@ -354,9 +370,9 @@ public class DeclarationBuilder : ILuaElementWalker
                     ),
                     DeclarationFeature.Local
                 );
-
+                AddReference(ReferenceKind.Definition, declaration, param);
                 parameters.Add(declaration);
-                AddDeclaration(declaration);
+                AddDeclaration(param.Position, declaration);
             }
             else if (param.IsVarArgs)
             {
@@ -370,10 +386,9 @@ public class DeclarationBuilder : ILuaElementWalker
 
                 var declaration = new LuaDeclaration(
                     "...",
-                    param.Position,
                     new ParamInfo(
                         new(param),
-                        luaType,
+                        luaType ?? new LuaVariableRefType(param.UniqueId),
                         true,
                         nullable
                     ),
@@ -381,7 +396,7 @@ public class DeclarationBuilder : ILuaElementWalker
                 );
 
                 parameters.Add(declaration);
-                AddDeclaration(declaration);
+                AddDeclaration(param.Position, declaration);
             }
         }
 
@@ -423,10 +438,9 @@ public class DeclarationBuilder : ILuaElementWalker
             {
                 var declaration = new LuaDeclaration(
                     name.RepresentText,
-                    param.Position,
                     new ParamInfo(
                         new(param),
-                        null,
+                        new LuaVariableRefType(param.UniqueId),
                         false
                     ),
                     DeclarationFeature.Local);
@@ -435,7 +449,8 @@ public class DeclarationBuilder : ILuaElementWalker
                     declaration.Info = declaration.Info with { DeclarationType = paramInfo.Item1 };
                 }
 
-                AddDeclaration(declaration);
+                AddReference(ReferenceKind.Definition, declaration, param);
+                AddDeclaration(param.Position, declaration);
                 parameters.Add(declaration);
             }
         }
@@ -448,34 +463,53 @@ public class DeclarationBuilder : ILuaElementWalker
     {
         if (forStatSyntax is { IteratorName.Name: { } name })
         {
-            AddDeclaration(new LuaDeclaration(
+            var declaration = new LuaDeclaration(
                 name.RepresentText,
-                forStatSyntax.IteratorName.Position,
                 new ParamInfo(
                     new(forStatSyntax.IteratorName),
                     Builtin.Integer,
                     false
                 ),
-                DeclarationFeature.Local));
+                DeclarationFeature.Local);
+            AddReference(ReferenceKind.Definition, declaration, forStatSyntax.IteratorName);
+            AddDeclaration(forStatSyntax.IteratorName.Position, declaration);
         }
     }
 
     private LuaType? FindFirstLocalOrAssignType(LuaStatSyntax stat)
     {
-        var docList = stat.Comments.FirstOrDefault()?.DocList;
-        if (docList is null)
+        foreach (var comment in stat.Comments)
         {
-            return null;
-        }
-
-        var tagNameTypeSyntax = docList.OfType<LuaDocTagNamedTypeSyntax>().FirstOrDefault();
-        if (tagNameTypeSyntax is { Name.RepresentText: { } name })
-        {
-            return new LuaNamedType(name);
+            var tagNameTypeSyntax = comment.DocList.OfType<LuaDocTagNamedTypeSyntax>().FirstOrDefault();
+            if (tagNameTypeSyntax is { Name.RepresentText: { } name })
+            {
+                return new LuaNamedType(name);
+            }
         }
 
         return null;
     }
+
+    private LuaType? FindTableFieldType(LuaTableFieldSyntax fieldSyntax)
+    {
+        foreach (var comment in fieldSyntax.Comments)
+        {
+            foreach (var tagSyntax in comment.DocList)
+            {
+                if (tagSyntax is LuaDocTagTypeSyntax { TypeList: { } typeList })
+                {
+                    return Context.Infer(typeList.FirstOrDefault());
+                }
+                else if (tagSyntax is LuaDocTagNamedTypeSyntax { Name: { } name })
+                {
+                    return new LuaNamedType(name.RepresentText);
+                }
+            }
+        }
+
+        return null;
+    }
+
 
     private List<LuaType> FindLocalOrAssignTypes(LuaStatSyntax stat) =>
     (
@@ -558,21 +592,20 @@ public class DeclarationBuilder : ILuaElementWalker
                 {
                     if (nameExpr.Name is { } name)
                     {
-                        var prevDeclaration = FindDeclaration(nameExpr);
+                        var prevDeclaration = FindLocalDeclaration(nameExpr);
                         if (prevDeclaration is null)
                         {
                             var declaration = new LuaDeclaration(
                                 name.RepresentText,
-                                nameExpr.Position,
                                 new GlobalInfo(
                                     new(nameExpr),
-                                    luaType,
-                                    false
+                                    luaType ?? new GlobalNameType(name.RepresentText)
                                 ),
                                 DeclarationFeature.Global
                             );
+                            AddReference(ReferenceKind.Definition, declaration, nameExpr);
                             AnalyzeDeclarationDoc(declaration, luaAssignStat);
-                            Db.AddGlobal(DocumentId, name.RepresentText, declaration);
+
                             var unResolveDeclaration =
                                 new UnResolvedDeclaration(declaration, relatedExpr, ResolveState.UnResolvedType);
                             AddUnResolved(unResolveDeclaration);
@@ -585,13 +618,19 @@ public class DeclarationBuilder : ILuaElementWalker
                                     declaration.Info = info with
                                     {
                                         DeclarationType = definedType,
-                                        IsTypeDefine = true
+                                        TypeDecl = true
                                     };
                                     unResolveDeclaration.IsTypeDeclaration = true;
                                 }
                             }
 
-                            AddDeclaration(declaration);
+                            Db.AddGlobal(DocumentId, unResolveDeclaration.IsTypeDeclaration,
+                                name.RepresentText, declaration);
+                            AddDeclaration(nameExpr.Position, declaration);
+                        }
+                        else
+                        {
+                            AddReference(ReferenceKind.Write, prevDeclaration, nameExpr);
                         }
                     }
 
@@ -609,12 +648,10 @@ public class DeclarationBuilder : ILuaElementWalker
                         : LuaElementPtr<LuaExprSyntax>.Empty;
                     var declaration = new LuaDeclaration(
                         indexExpr.Name,
-                        indexExpr.Position,
                         new IndexInfo(
                             new(indexExpr),
                             valueExprPtr,
-                            luaType,
-                            false
+                            luaType
                         )
                     );
                     AnalyzeDeclarationDoc(declaration, luaAssignStat);
@@ -629,7 +666,6 @@ public class DeclarationBuilder : ILuaElementWalker
                             declaration.Info = indexInfo with
                             {
                                 DeclarationType = declarationType,
-                                IsTypeDefine = true
                             };
                             unResolveDeclaration.IsTypeDeclaration = true;
                         }
@@ -649,7 +685,6 @@ public class DeclarationBuilder : ILuaElementWalker
             {
                 var declaration = new LuaDeclaration(
                     name.RepresentText,
-                    luaFuncStat.LocalName.Position,
                     new MethodInfo(
                         new(luaFuncStat.LocalName),
                         null,
@@ -657,8 +692,9 @@ public class DeclarationBuilder : ILuaElementWalker
                     ),
                     DeclarationFeature.Local
                 );
+                AddReference(ReferenceKind.Definition, declaration, luaFuncStat.LocalName);
                 AnalyzeDeclarationDoc(declaration, luaFuncStat);
-                AddDeclaration(declaration);
+                AddDeclaration(luaFuncStat.LocalName.Position, declaration);
                 var unResolved = new UnResolvedDeclaration(declaration, new LuaExprRef(closureExpr),
                     ResolveState.UnResolvedType);
                 AddUnResolved(unResolved);
@@ -666,12 +702,11 @@ public class DeclarationBuilder : ILuaElementWalker
             }
             case { IsLocal: false, NameExpr.Name: { } name2, ClosureExpr: { } closureExpr }:
             {
-                var prevDeclaration = FindDeclaration(luaFuncStat.NameExpr);
+                var prevDeclaration = FindLocalDeclaration(luaFuncStat.NameExpr);
                 if (prevDeclaration is null)
                 {
                     var declaration = new LuaDeclaration(
                         name2.RepresentText,
-                        luaFuncStat.NameExpr.Position,
                         new MethodInfo(
                             new(luaFuncStat.NameExpr),
                             null,
@@ -680,8 +715,8 @@ public class DeclarationBuilder : ILuaElementWalker
                         DeclarationFeature.Global
                     );
                     AnalyzeDeclarationDoc(declaration, luaFuncStat);
-                    Db.AddGlobal(DocumentId, name2.RepresentText, declaration);
-                    AddDeclaration(declaration);
+                    Db.AddGlobal(DocumentId, true, name2.RepresentText, declaration);
+                    AddDeclaration(luaFuncStat.NameExpr.Position, declaration);
                     var unResolved = new UnResolvedDeclaration(declaration, new LuaExprRef(closureExpr),
                         ResolveState.UnResolvedType);
                     AddUnResolved(unResolved);
@@ -695,7 +730,6 @@ public class DeclarationBuilder : ILuaElementWalker
                 {
                     var declaration = new LuaDeclaration(
                         name,
-                        indexExpr.Position,
                         new MethodInfo(
                             new(indexExpr),
                             null,
@@ -732,7 +766,6 @@ public class DeclarationBuilder : ILuaElementWalker
                 {
                     var declaration = new LuaDeclaration(
                         name.RepresentText,
-                        param.Position,
                         new GenericParamInfo(
                             new(param),
                             Context.Infer(param.Type),
@@ -767,19 +800,25 @@ public class DeclarationBuilder : ILuaElementWalker
         }
 
         var mainRetType = GetRetType(docList);
+        if (mainRetType.Equals(Builtin.Unknown) && closureExprSyntax.Block is null)
+        {
+            mainRetType = Builtin.Nil;
+        }
+
         var isColonDefine = closureExprSyntax.Parent is LuaFuncStatSyntax { IsColonFunc: true };
         var method = genericParameters.Count != 0
             ? new LuaGenericMethodType(
                 genericParameters,
-                new LuaSignature(mainRetType, parameters), overloads, isColonDefine)
-            : new LuaMethodType(new LuaSignature(mainRetType, parameters), overloads, isColonDefine);
+                new LuaSignature(mainRetType, parameters.Cast<IDeclaration>().ToList()), overloads, isColonDefine)
+            : new LuaMethodType(new LuaSignature(mainRetType, parameters.Cast<IDeclaration>().ToList()), overloads,
+                isColonDefine);
         if (closureExprSyntax.Block is { } block)
         {
             var unResolved = new UnResolvedMethod(method, block, ResolveState.UnResolveReturn);
             AddUnResolved(unResolved);
         }
 
-        Db.AddIdRelatedType(DocumentId, closureExprSyntax.UniqueId, method);
+        Db.AddIdRelatedType(closureExprSyntax.UniqueId, method);
     }
 
     private void AnalyzeClassTagDeclaration(LuaDocTagClassSyntax tagClassSyntax)
@@ -789,7 +828,6 @@ public class DeclarationBuilder : ILuaElementWalker
             var luaClass = new LuaNamedType(name.RepresentText);
             var declaration = new LuaDeclaration(
                 name.RepresentText,
-                tagClassSyntax.Position,
                 new NamedTypeInfo(
                     new(tagClassSyntax),
                     luaClass,
@@ -797,7 +835,7 @@ public class DeclarationBuilder : ILuaElementWalker
                 )
             );
 
-            Db.AddType(DocumentId, name.RepresentText, declaration);
+            Db.AddTypeDefinition(DocumentId, name.RepresentText, declaration);
 
             AnalyzeTypeFields(luaClass, tagClassSyntax);
             AnalyzeTypeOperator(luaClass, tagClassSyntax);
@@ -827,7 +865,6 @@ public class DeclarationBuilder : ILuaElementWalker
             var baseTy = Context.Infer(type);
             var declaration = new LuaDeclaration(
                 name.RepresentText,
-                tagAliasSyntax.Position,
                 new NamedTypeInfo(
                     new(tagAliasSyntax),
                     luaAlias,
@@ -847,7 +884,6 @@ public class DeclarationBuilder : ILuaElementWalker
             var luaEnum = new LuaNamedType(name.RepresentText);
             var declaration = new LuaDeclaration(
                 name.RepresentText,
-                tagEnumSyntax.Position,
                 new NamedTypeInfo(
                     new(tagEnumSyntax),
                     luaEnum,
@@ -861,12 +897,11 @@ public class DeclarationBuilder : ILuaElementWalker
                 {
                     var fieldDeclaration = new LuaDeclaration(
                         fieldName.RepresentText,
-                        field.Position,
                         new EnumFieldInfo(
                             new(field),
                             baseType
                         ));
-                    Db.AddMember(DocumentId, name.RepresentText, fieldDeclaration);
+                    Db.AddMember(DocumentId, luaEnum, fieldDeclaration);
                 }
             }
         }
@@ -879,15 +914,13 @@ public class DeclarationBuilder : ILuaElementWalker
             var luaInterface = new LuaNamedType(name.RepresentText);
             var declaration = new LuaDeclaration(
                 name.RepresentText,
-                tagInterfaceSyntax.Position,
                 new NamedTypeInfo(
                     new(tagInterfaceSyntax),
                     luaInterface,
                     NamedTypeKind.Interface
                 ));
 
-
-            Db.AddType(DocumentId, name.RepresentText, declaration);
+            Db.AddTypeDefinition(DocumentId, name.RepresentText, declaration);
             AnalyzeTypeFields(luaInterface, tagInterfaceSyntax);
             AnalyzeTypeOperator(luaInterface, tagInterfaceSyntax);
             if (tagInterfaceSyntax is { Body: { } body })
@@ -919,7 +952,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var retType = Context.Infer(operatorSyntax.ReturnType);
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             retType
@@ -934,7 +966,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var retType = Context.Infer(operatorSyntax.ReturnType);
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             retType
@@ -949,7 +980,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var retType = Context.Infer(operatorSyntax.ReturnType);
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             retType
@@ -964,7 +994,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var retType = Context.Infer(operatorSyntax.ReturnType);
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             retType
@@ -979,7 +1008,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var retType = Context.Infer(operatorSyntax.ReturnType);
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             retType
@@ -994,7 +1022,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var retType = Context.Infer(operatorSyntax.ReturnType);
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             retType
@@ -1008,7 +1035,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var retType = Context.Infer(operatorSyntax.ReturnType);
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             retType
@@ -1023,7 +1049,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var retType = Context.Infer(operatorSyntax.ReturnType);
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             retType
@@ -1038,7 +1063,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var retType = Context.Infer(operatorSyntax.ReturnType);
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             retType
@@ -1053,7 +1077,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var retType = Context.Infer(operatorSyntax.ReturnType);
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             retType
@@ -1068,7 +1091,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var retType = Context.Infer(operatorSyntax.ReturnType);
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             retType
@@ -1082,7 +1104,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var retType = Context.Infer(operatorSyntax.ReturnType);
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             retType
@@ -1097,7 +1118,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var retType = Context.Infer(operatorSyntax.ReturnType);
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             retType
@@ -1112,7 +1132,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var retType = Context.Infer(operatorSyntax.ReturnType);
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             retType
@@ -1127,7 +1146,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var retType = Context.Infer(operatorSyntax.ReturnType);
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             retType
@@ -1141,7 +1159,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var retType = Context.Infer(operatorSyntax.ReturnType);
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             retType
@@ -1155,7 +1172,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var type = Context.Infer(operatorSyntax.Types.FirstOrDefault());
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             type
@@ -1169,7 +1185,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var type = Context.Infer(operatorSyntax.Types.FirstOrDefault());
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             type
@@ -1183,7 +1198,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     var type = Context.Infer(operatorSyntax.Types.FirstOrDefault());
                     var opDeclaration = new LuaDeclaration(
                         string.Empty,
-                        operatorSyntax.Position,
                         new TypeOpInfo(
                             new(operatorSyntax),
                             type
@@ -1192,12 +1206,6 @@ public class DeclarationBuilder : ILuaElementWalker
                     Db.AddTypeOperator(DocumentId, op);
                     break;
                 }
-                // TODO:
-                // case "call":
-                // {
-                //
-                //     break;
-                // }
             }
         }
 
@@ -1218,11 +1226,12 @@ public class DeclarationBuilder : ILuaElementWalker
             VisibilityKind.Public => DeclarationVisibility.Public,
             VisibilityKind.Protected => DeclarationVisibility.Protected,
             VisibilityKind.Private => DeclarationVisibility.Private,
+            VisibilityKind.Package => DeclarationVisibility.Package,
             _ => DeclarationVisibility.Public
         };
     }
 
-    private void AnalyzeDocDetailField(LuaNamedType namedType, LuaDocFieldSyntax field)
+    private void AnalyzeDocDetailField(LuaType parentType, LuaDocFieldSyntax field)
     {
         var visibility = field.Visibility;
         switch (field)
@@ -1232,14 +1241,13 @@ public class DeclarationBuilder : ILuaElementWalker
                 var type = Context.Infer(type1);
                 var declaration = new LuaDeclaration(
                     nameField.RepresentText,
-                    field.Position,
                     new DocFieldInfo(
                         new(field),
                         type),
                     DeclarationFeature.None,
                     GetVisibility(visibility)
                 );
-                Db.AddMember(DocumentId, namedType.Name, declaration);
+                Db.AddMember(DocumentId, parentType, declaration);
                 break;
             }
             case { IntegerField: { } integerField, Type: { } type2 }:
@@ -1247,7 +1255,6 @@ public class DeclarationBuilder : ILuaElementWalker
                 var type = Context.Infer(type2);
                 var declaration = new LuaDeclaration(
                     $"[{integerField.Value}]",
-                    field.Position,
                     new DocFieldInfo(
                         new(field),
                         type
@@ -1255,7 +1262,7 @@ public class DeclarationBuilder : ILuaElementWalker
                     DeclarationFeature.None,
                     GetVisibility(visibility)
                 );
-                Db.AddMember(DocumentId, namedType.Name, declaration);
+                Db.AddMember(DocumentId, parentType, declaration);
                 break;
             }
             case { StringField: { } stringField, Type: { } type3 }:
@@ -1263,14 +1270,13 @@ public class DeclarationBuilder : ILuaElementWalker
                 var type = Context.Infer(type3);
                 var declaration = new LuaDeclaration(
                     stringField.Value,
-                    field.Position,
                     new DocFieldInfo(
                         new(field),
                         type),
                     DeclarationFeature.None,
                     GetVisibility(visibility)
                 );
-                Db.AddMember(DocumentId, namedType.Name, declaration);
+                Db.AddMember(DocumentId, parentType, declaration);
                 break;
             }
             case { TypeField: { } typeField, Type: { } type4 }:
@@ -1279,13 +1285,12 @@ public class DeclarationBuilder : ILuaElementWalker
                 var valueType = Context.Infer(type4);
                 var docIndexDeclaration = new LuaDeclaration(
                     string.Empty,
-                    field.Position,
                     new TypeIndexInfo(
                         keyType,
                         valueType,
                         new(field)
                     ));
-                var indexOperator = new IndexOperator(namedType, keyType, valueType, docIndexDeclaration);
+                var indexOperator = new IndexOperator(parentType, keyType, valueType, docIndexDeclaration);
                 Db.AddTypeOperator(DocumentId, indexOperator);
                 break;
             }
@@ -1303,11 +1308,11 @@ public class DeclarationBuilder : ILuaElementWalker
         }
     }
 
-    private void AnalyzeDocBody(LuaNamedType namedType, LuaDocBodySyntax docBody)
+    private void AnalyzeDocBody(LuaType type, LuaDocBodySyntax docBody)
     {
         foreach (var field in docBody.FieldList)
         {
-            AnalyzeDocDetailField(namedType, field);
+            AnalyzeDocDetailField(type, field);
         }
     }
 
@@ -1330,7 +1335,6 @@ public class DeclarationBuilder : ILuaElementWalker
                 var type = param.Type is not null ? Context.Infer(param.Type) : null;
                 var declaration = new LuaDeclaration(
                     name.RepresentText,
-                    param.Position,
                     new GenericParamInfo(
                         new(param),
                         type
@@ -1342,23 +1346,25 @@ public class DeclarationBuilder : ILuaElementWalker
 
     private void AnalyzeTableExprDeclaration(LuaTableExprSyntax tableExprSyntax)
     {
-        var tableClass = tableExprSyntax.UniqueString;
+        var tableClass = new LuaTableLiteralType(tableExprSyntax);
         foreach (var fieldSyntax in tableExprSyntax.FieldList)
         {
             if (fieldSyntax is { Name: { } fieldName, Value: { } value })
             {
-                // TODO get type from ---@field ---@type
+                var type = FindTableFieldType(fieldSyntax);
                 var declaration = new LuaDeclaration(
                     fieldName,
-                    fieldSyntax.Position,
                     new TableFieldInfo(
                         new(fieldSyntax),
-                        null
+                        type
                     ));
                 Db.AddMember(DocumentId, tableClass, declaration);
-                var unResolveDeclaration =
-                    new UnResolvedDeclaration(declaration, new LuaExprRef(value), ResolveState.UnResolvedType);
-                AddUnResolved(unResolveDeclaration);
+                if (type == null)
+                {
+                    var unResolveDeclaration =
+                        new UnResolvedDeclaration(declaration, new LuaExprRef(value), ResolveState.UnResolvedType);
+                    AddUnResolved(unResolveDeclaration);
+                }
             }
         }
     }
@@ -1380,9 +1386,15 @@ public class DeclarationBuilder : ILuaElementWalker
         }
     }
 
-    private void IndexNameExpr(LuaNameExprSyntax nameExpr)
+    private void AnalyzeNameExpr(LuaNameExprSyntax nameExpr)
     {
         Db.AddNameExpr(DocumentId, nameExpr);
+
+        var declaration = FindLocalDeclaration(nameExpr);
+        if (declaration is not null)
+        {
+            AddReference(ReferenceKind.Read, declaration, nameExpr);
+        }
     }
 
     private void IndexIndexExpr(LuaIndexExprSyntax indexExpr)
@@ -1399,7 +1411,7 @@ public class DeclarationBuilder : ILuaElementWalker
     {
         if (diagnosticSyntax is
             {
-                Action: { RepresentText: { } actionName },
+                Action: { Text: { } actionName },
                 Diagnostics: { DiagnosticNames: { } diagnosticNames }
             })
         {
@@ -1485,6 +1497,7 @@ public class DeclarationBuilder : ILuaElementWalker
                             var versionNumber = version.VersionNumber?.Version ?? new VersionNumber(0, 0, 0, 0);
                             requiredVersions.Add(new RequiredVersion(action, framework, versionNumber));
                         }
+
                         declaration.RequiredVersions = requiredVersions;
                         break;
                     }

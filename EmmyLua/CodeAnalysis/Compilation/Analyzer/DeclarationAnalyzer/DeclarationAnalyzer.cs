@@ -4,12 +4,14 @@ public class DeclarationAnalyzer(LuaCompilation compilation) : LuaAnalyzer(compi
 {
     public override void Analyze(AnalyzeContext analyzeContext)
     {
-        var declarationTrees = analyzeContext.LuaDocuments.Select(
-            it => new DeclarationBuilder(it.Id, it.SyntaxTree, this, analyzeContext).Build()
-        );
-        foreach (var declarationTree in declarationTrees)
+        foreach (var document in analyzeContext.LuaDocuments)
         {
-            Compilation.DeclarationTrees[declarationTree.SyntaxTree.Document.Id] = declarationTree;
+            var builder = new DeclarationBuilder(document.Id, document.SyntaxTree, this, analyzeContext);
+            var tree = builder.Build();
+            if (tree is not null)
+            {
+                Compilation.Db.AddDeclarationTree(document.Id, tree);
+            }
         }
     }
 }

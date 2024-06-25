@@ -2,9 +2,8 @@
 using EmmyLua.CodeAnalysis.Compilation.Analyzer.DeclarationAnalyzer;
 using EmmyLua.CodeAnalysis.Compilation.Analyzer.FlowAnalyzer;
 using EmmyLua.CodeAnalysis.Compilation.Analyzer.ResolveAnalyzer;
-using EmmyLua.CodeAnalysis.Compilation.Declaration;
 using EmmyLua.CodeAnalysis.Compilation.Index;
-using EmmyLua.CodeAnalysis.Compilation.Infer;
+using EmmyLua.CodeAnalysis.Compilation.Search;
 using EmmyLua.CodeAnalysis.Compilation.Semantic;
 using EmmyLua.CodeAnalysis.Diagnostics;
 using EmmyLua.CodeAnalysis.Document;
@@ -21,11 +20,9 @@ public class LuaCompilation
 
     public IEnumerable<LuaSyntaxTree> SyntaxTrees => _syntaxTrees.Values;
 
-    public DbManager Db { get; }
+    public WorkspaceIndex Db { get; }
 
     private HashSet<LuaDocumentId> DirtyDocumentIds { get; } = [];
-
-    internal Dictionary<LuaDocumentId, LuaDeclarationTree> DeclarationTrees { get; } = new();
 
     private List<LuaAnalyzer> Analyzers { get; }
 
@@ -36,7 +33,7 @@ public class LuaCompilation
     public LuaCompilation(LuaWorkspace workspace)
     {
         Workspace = workspace;
-        Db = new DbManager(this);
+        Db = new();
         Analyzers =
         [
             new DeclarationAnalyzer(this),
@@ -86,7 +83,6 @@ public class LuaCompilation
             luaAnalyzer.RemoveCache(documentId);
         }
 
-        DeclarationTrees.Remove(documentId);
         Db.Remove(documentId);
         Diagnostics.RemoveCache(documentId);
     }
@@ -104,13 +100,7 @@ public class LuaCompilation
             return null;
         }
 
-        var declarationTree = DeclarationTrees.GetValueOrDefault(document.Id);
-        if (declarationTree is null)
-        {
-            return null;
-        }
-
-        return new SemanticModel(this, document, declarationTree);
+        return new SemanticModel(this, document);
     }
 
     public SemanticModel? GetSemanticModel(LuaDocumentId documentId)
@@ -121,13 +111,7 @@ public class LuaCompilation
             return null;
         }
 
-        var declarationTree = DeclarationTrees.GetValueOrDefault(documentId);
-        if (declarationTree is null)
-        {
-            return null;
-        }
-
-        return new SemanticModel(this, document, declarationTree);
+        return new SemanticModel(this, document);
     }
 
     private void AnalyzeDirtyDocuments()
@@ -179,11 +163,6 @@ public class LuaCompilation
     private void AddDirtyDocument(LuaDocumentId documentId)
     {
         DirtyDocumentIds.Add(documentId);
-    }
-
-    public LuaDeclarationTree? GetDeclarationTree(LuaDocumentId documentId)
-    {
-        return DeclarationTrees.GetValueOrDefault(documentId);
     }
 
     public IEnumerable<Diagnostic> GetAllDiagnosticsParallel()

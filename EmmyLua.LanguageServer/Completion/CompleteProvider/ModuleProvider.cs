@@ -1,8 +1,8 @@
 ﻿using EmmyLua.CodeAnalysis.Compilation.Semantic;
 using EmmyLua.CodeAnalysis.Compilation.Type;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
-using EmmyLua.CodeAnalysis.Util.FilenameConverter;
 using EmmyLua.CodeAnalysis.Workspace.Module;
+using EmmyLua.CodeAnalysis.Workspace.Module.FilenameConverter;
 using EmmyLua.LanguageServer.ExecuteCommand.Commands;
 using OmniSharp.Extensions.LanguageServer.Protocol.Models;
 
@@ -44,7 +44,7 @@ public class ModuleProvider : ICompleteProviderBase
                     LabelDetails = new CompletionItemLabelDetails()
                     {
                         Detail = $" (in {module.ModulePath})",
-                        Description = context.SemanticModel.RenderBuilder.RenderType(retTy, context.RenderFeature)
+                        Description = context.RenderBuilder.RenderType(retTy, context.RenderFeature)
                     },
                     Data = module.DocumentId.Id.ToString(),
                     Command = AutoRequire.MakeCommand(
