@@ -57,6 +57,14 @@ public class ElementInfer(SearchContext context)
         try
         {
             _currentDepth++;
+            
+            // First check if we have a stored type from @type annotation
+            var storedType = context.Compilation.TypeManager.FindTypeInfo(element.UniqueId)?.BaseType;
+            if (storedType != null && !storedType.IsSameType(Builtin.Unknown, context))
+            {
+                return storedType;
+            }
+
             return element switch
             {
                 LuaExprSyntax expr => ExpressionInfer.InferExpr(expr, context),

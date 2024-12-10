@@ -98,33 +98,10 @@ public class AttachDeclarationAnalyzer(
             {
                 var type = new LuaNamedType(declarationContext.DocumentId, name);
                 firstDeclaration.Type = type;
+                declarationContext.TypeManager.SetBaseType(firstDeclaration.UniqueId, type);
                 if (firstDeclaration.IsGlobal)
                 {
                     declarationContext.TypeManager.SetGlobalTypeSymbol(firstDeclaration.Name, type);
-                }
-
-                return;
-            }
-
-            // general cast type
-            var nameTypeList = docTagSyntaxes.OfType<LuaDocTagTypeSyntax>().FirstOrDefault();
-            if (nameTypeList is { TypeList: { } typeList })
-            {
-                var luaTypeList = typeList.Select(searchContext.Infer).ToList();
-                for (var i = 0; i < luaTypeList.Count; i++)
-                {
-                    if (declarations.Count > i)
-                    {
-                        if (declarations[i].IsGlobal && declarations[i].Type is GlobalNameType globalNameType)
-                        {
-                            declarationContext.TypeManager.SetGlobalBaseType(declarationContext.DocumentId,
-                                globalNameType, luaTypeList[i]);
-                        }
-                        else
-                        {
-                            declarations[i].Type = luaTypeList[i];
-                        }
-                    }
                 }
             }
         }
