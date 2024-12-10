@@ -91,7 +91,33 @@ public class AttachDeclarationAnalyzer(
 
         if (attachedElement is LuaLocalStatSyntax or LuaAssignStatSyntax or LuaTableFieldSyntax)
         {
-            // general type define
+            // Process @type annotations with highest priority
+            var nameTypeList = docTagSyntaxes.OfType<LuaDocTagTypeSyntax>().FirstOrDefault();
+            if (nameTypeList is { TypeList: { } typeList })
+            {
+                var luaTypeList = typeList.Select(searchContext.Infer).ToList();
+                for (var i = 0; i < luaTypeList.Count && i < declarations.Count; i++)
+                {
+                    var type = luaTypeList[i];
+                    if (type != null && !type.IsSameType(Builtin.Unknown, searchContext))
+                    {
+                        if (declarations[i].IsGlobal && declarations[i].Type is GlobalNameType globalNameType)
+                        {
+                            declarationContext.TypeManager.SetGlobalBaseType(declarationContext.DocumentId,
+                                globalNameType, type);
+                        }
+                        else
+                        {
+                            declarations[i].Type = type;
+                            // Store the type in TypeManager to ensure it's preserved
+                            declarationContext.TypeManager.SetBaseType(declarations[i].UniqueId, type);
+                        }
+                    }
+                }
+                return; // Exit after processing @type to prevent overrides
+            }
+
+            // Only process named type if no @type annotation was found
             var nameTypeDefine = docTagSyntaxes.OfType<LuaDocTagNamedTypeSyntax>().FirstOrDefault();
             if (nameTypeDefine is { Name.RepresentText: { } name } &&
                 declarations.FirstOrDefault() is { } firstDeclaration)
