@@ -1,6 +1,6 @@
 ﻿using EmmyLua.CodeAnalysis.Compilation.Search;
-using EmmyLua.CodeAnalysis.Compilation.Type;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
+using EmmyLua.CodeAnalysis.Type;
 
 namespace EmmyLua.CodeAnalysis.Compilation.Infer;
 
@@ -11,33 +11,35 @@ public static class CallExprInfer
         LuaType returnType = Builtin.Unknown;
         var prefixExpr = callExpr.PrefixExpr;
         var callName = callExpr.Name;
-        if (context.Compilation.Workspace.Features.RequireLikeFunction.Contains(callName))
+        if (context.Compilation.Project.Features.RequireLikeFunction.Contains(callName))
         {
             return InferRequire(callExpr, context);
         }
 
-        var luaType = context.Infer(prefixExpr);
+        var parentType = context.Infer(prefixExpr);
         var args = callExpr.ArgList?.ArgList.ToList() ?? [];
-        context.FindMethodsForType(luaType, luaMethod =>
+        foreach (var luaMethod in context.FindCallableType(parentType))
         {
             var perfectSig = MethodInfer.FindPerfectMatchSignature(luaMethod, callExpr, args, context);
             if (perfectSig.ReturnType is { } retTy)
             {
                 // ReSharper disable once AccessToModifiedClosure
-                returnType = returnType.Union(retTy);
-            }
-        });
-
-        if (returnType.Equals(Builtin.Unknown) && prefixExpr is LuaIndexExprSyntax indexExpr)
-        {
-            var fnName = indexExpr.Name;
-            if (fnName is not null && string.Equals(fnName, "new", StringComparison.CurrentCultureIgnoreCase))
-            {
-                returnType = context.Infer(indexExpr.PrefixExpr);
+                returnType = returnType.Union(retTy, context);
+                break;
             }
         }
 
-        return UnwrapReturn(callExpr, context, returnType, 0);
+        // TODO: use config enable this feature
+        // if (returnType.Equals(Builtin.Unknown) && prefixExpr is LuaIndexExprSyntax indexExpr)
+        // {
+        //     var fnName = indexExpr.Name;
+        //     if (fnName is not null && string.Equals(fnName, "new", StringComparison.CurrentCultureIgnoreCase))
+        //     {
+        //         returnType = context.Infer(indexExpr.PrefixExpr);
+        //     }
+        // }
+
+        return UnwrapReturn(callExpr, context, returnType, parentType, 0);
     }
 
     /// <summary>
@@ -46,36 +48,35 @@ public static class CallExprInfer
     /// <param name="callExprSyntax"></param>
     /// <param name="context"></param>
     /// <param name="ret"></param>
+    /// <param name="parentType"></param>
     /// <param name="level"></param>
     /// <returns></returns>
     private static LuaType UnwrapReturn(
         LuaCallExprSyntax callExprSyntax,
         SearchContext context,
         LuaType ret,
+        LuaType parentType,
         int level = 0)
     {
         switch (ret)
         {
             case LuaUnionType unionType:
             {
-                return UnwrapUnion(unionType, callExprSyntax, context, level);
+                return UnwrapUnion(unionType, callExprSyntax, context, parentType, level);
             }
             case LuaMultiReturnType multiRetType:
             {
-                return UnwrapMultiReturn(multiRetType, callExprSyntax, context, level);
+                return UnwrapMultiReturn(multiRetType, callExprSyntax, context, parentType, level);
             }
             case LuaVariadicType variadicType:
             {
-                return UnwrapVariadicType(variadicType, callExprSyntax, context, level);
+                return UnwrapVariadicType(variadicType, callExprSyntax, context, parentType, level);
             }
             case LuaNamedType namedType:
             {
                 if (namedType.Name == "self")
                 {
-                    if (callExprSyntax.PrefixExpr is LuaIndexExprSyntax { PrefixExpr: { } prefixExpr })
-                    {
-                        return context.Infer(prefixExpr);
-                    }
+                    return parentType;
                 }
 
                 break;
@@ -85,20 +86,21 @@ public static class CallExprInfer
         return ret;
     }
 
-    private static LuaType UnwrapUnion(LuaUnionType unionType, LuaCallExprSyntax callExprSyntax, SearchContext context,
-        int level)
+    private static LuaType UnwrapUnion(LuaUnionType unionType, LuaCallExprSyntax callExprSyntax,
+        SearchContext context, LuaType parentType, int level)
     {
         if (level > 0)
         {
             return unionType;
         }
 
-        var types = unionType.UnionTypes.Select(t => UnwrapReturn(callExprSyntax, context, t, level)).ToList();
+        var types = unionType.UnionTypes.Select(t => UnwrapReturn(callExprSyntax, context, t, parentType, level))
+            .ToList();
         return new LuaUnionType(types);
     }
 
     private static LuaType UnwrapMultiReturn(LuaMultiReturnType multiReturnType, LuaCallExprSyntax callExprSyntax,
-        SearchContext context, int level)
+        SearchContext context, LuaType parentType, int level)
     {
         if (level > 0)
         {
@@ -107,11 +109,11 @@ public static class CallExprInfer
 
         var retType = IsLastCallExpr(callExprSyntax) ? multiReturnType : multiReturnType.GetElementType(0);
 
-        return UnwrapReturn(callExprSyntax, context, retType, level + 1);
+        return UnwrapReturn(callExprSyntax, context, retType, parentType,level + 1);
     }
 
     private static LuaType UnwrapVariadicType(LuaVariadicType variadicType, LuaCallExprSyntax callExprSyntax,
-        SearchContext context, int level)
+        SearchContext context, LuaType parentType, int level)
     {
         if (level > 1)
         {
@@ -157,7 +159,7 @@ public static class CallExprInfer
         var firstArg = callExpr.ArgList?.ArgList.FirstOrDefault();
         if (firstArg is LuaLiteralExprSyntax { Literal: LuaStringToken { Value: { } modulePath } })
         {
-            var document = context.Compilation.Workspace.ModuleManager.FindModule(modulePath);
+            var document = context.Compilation.Project.ModuleManager.FindModule(modulePath);
             if (document is not null)
             {
                 return context.Infer(document.SyntaxTree.SyntaxRoot);

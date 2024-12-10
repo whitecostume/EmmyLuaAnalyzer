@@ -2,15 +2,18 @@
 using EmmyLua.CodeAnalysis.Syntax.Kind;
 using EmmyLua.CodeAnalysis.Syntax.Node;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
+using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Common;
+using EmmyLua.LanguageServer.Framework.Protocol.Message.SemanticToken;
+using EmmyLua.LanguageServer.Framework.Protocol.Model;
 using EmmyLua.LanguageServer.Util;
-using OmniSharp.Extensions.LanguageServer.Protocol.Document;
-using OmniSharp.Extensions.LanguageServer.Protocol.Models;
 
 namespace EmmyLua.LanguageServer.SemanticToken;
 
 public class SemanticTokensAnalyzer
 {
     public SemanticTokensLegend Legend { get; }
+
+    public bool MultiLineTokenSupport { get; set; }
 
     public SemanticTokensAnalyzer()
     {
@@ -21,66 +24,74 @@ public class SemanticTokensAnalyzer
         };
     }
 
-    public readonly List<SemanticTokenType> TokenTypes = new()
-    {
-        SemanticTokenType.Comment,
-        SemanticTokenType.Keyword,
-        SemanticTokenType.String,
-        SemanticTokenType.Number,
-        SemanticTokenType.Regexp,
-        SemanticTokenType.Operator,
-        SemanticTokenType.Type,
-        SemanticTokenType.Class,
-        SemanticTokenType.Interface,
-        SemanticTokenType.Enum,
-        SemanticTokenType.TypeParameter,
-        SemanticTokenType.Function,
-        SemanticTokenType.Method,
-        SemanticTokenType.Property,
-        SemanticTokenType.Variable,
-        SemanticTokenType.Parameter,
-        SemanticTokenType.Label,
-        SemanticTokenType.Modifier,
-        SemanticTokenType.EnumMember,
-        SemanticTokenType.Decorator
-    };
+    private List<string> TokenTypes { get; } =
+    [
+        SemanticTokenTypes.Namespace,
+        SemanticTokenTypes.Type,
+        SemanticTokenTypes.Class,
+        SemanticTokenTypes.Enum,
+        SemanticTokenTypes.Interface,
+        SemanticTokenTypes.Struct,
+        SemanticTokenTypes.TypeParameter,
+        SemanticTokenTypes.Parameter,
+        SemanticTokenTypes.Variable,
+        SemanticTokenTypes.Property,
+        SemanticTokenTypes.EnumMember,
+        SemanticTokenTypes.Event,
+        SemanticTokenTypes.Function,
+        SemanticTokenTypes.Method,
+        SemanticTokenTypes.Macro,
+        SemanticTokenTypes.Keyword,
+        SemanticTokenTypes.Modifier,
+        SemanticTokenTypes.Comment,
+        SemanticTokenTypes.String,
+        SemanticTokenTypes.Number,
+        SemanticTokenTypes.Regexp,
+        SemanticTokenTypes.Operator,
+        SemanticTokenTypes.Decorator,
+    ];
 
-    public readonly List<SemanticTokenModifier> TokenModifiers = new()
-    {
-        SemanticTokenModifier.Declaration,
-        SemanticTokenModifier.Definition,
-        SemanticTokenModifier.Readonly,
-        SemanticTokenModifier.Static,
-        SemanticTokenModifier.Abstract,
-        SemanticTokenModifier.Deprecated,
-        SemanticTokenModifier.Async,
-        SemanticTokenModifier.DefaultLibrary,
-    };
+    private List<string> TokenModifiers { get; } =
+    [
+        SemanticTokenModifiers.Declaration,
+        SemanticTokenModifiers.Definition,
+        SemanticTokenModifiers.Readonly,
+        SemanticTokenModifiers.Static,
+        SemanticTokenModifiers.Deprecated,
+        SemanticTokenModifiers.Abstract,
+        SemanticTokenModifiers.Async,
+        SemanticTokenModifiers.Modification,
+        SemanticTokenModifiers.Documentation,
+        SemanticTokenModifiers.DefaultLibrary,
+    ];
 
-    public void Tokenize(SemanticTokensBuilder builder, SemanticModel semanticModel,
-        CancellationToken cancellationToken)
+    public List<uint> Tokenize(SemanticModel semanticModel, bool isVscode, CancellationToken cancellationToken)
     {
+        var innerBuilder = new SemanticTokensBuilder(TokenTypes, TokenModifiers);
+        var builder = new SemanticBuilderWrapper(innerBuilder, semanticModel.Document, MultiLineTokenSupport);
         var document = semanticModel.Document;
         var syntaxTree = document.SyntaxTree;
         try
         {
-            foreach (var nodeOrToken in syntaxTree.SyntaxRoot.DescendantsWithToken)
+            var commentNodeOrToken = syntaxTree.SyntaxRoot.Descendants.OfType<LuaCommentSyntax>()
+                .SelectMany(it => it.DescendantsWithToken);
+            foreach (var nodeOrToken in commentNodeOrToken)
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    return;
+                    return [];
                 }
 
                 switch (nodeOrToken)
                 {
                     case LuaSyntaxToken token:
                     {
-                        TokenizeToken(builder, token, semanticModel, cancellationToken);
+                        TokenizeToken(builder, token, isVscode);
                         break;
                     }
                     case LuaSyntaxNode node:
                     {
-                        TokenizeNode(builder, node, semanticModel, cancellationToken);
+                        TokenizeNode(builder, node);
                         break;
                     }
                 }
@@ -88,123 +99,154 @@ public class SemanticTokensAnalyzer
         }
         catch (OperationCanceledException)
         {
-            // ignored
+            // ignore
         }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine(e);
+        }
+
+        return builder.Build();
     }
 
-    private void TokenizeToken(SemanticTokensBuilder builder, LuaSyntaxToken token, SemanticModel semanticModel,
+    public List<uint> TokenizeByRange(SemanticModel semanticModel, bool isVscode, DocumentRange range,
         CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
+        var innerBuilder = new SemanticTokensBuilder(TokenTypes, TokenModifiers);
+        var builder = new SemanticBuilderWrapper(innerBuilder, semanticModel.Document, MultiLineTokenSupport);
+        var document = semanticModel.Document;
+        var syntaxTree = document.SyntaxTree;
+        try
+        {
+            var sourceRange = range.ToSourceRange(document);
+            foreach (var nodeOrToken in syntaxTree.SyntaxRoot.DescendantsInRange(sourceRange))
+            {
+                switch (nodeOrToken)
+                {
+                    case LuaSyntaxToken token:
+                    {
+                        TokenizeToken(builder, token, isVscode);
+                        break;
+                    }
+                    case LuaSyntaxNode node:
+                    {
+                        TokenizeNode(builder, node);
+                        break;
+                    }
+                }
+            }
+            
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return [];
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // ignore
+        }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine(e);
+        }
 
+        return builder.Build();
+    }
+
+    private void TokenizeToken(SemanticBuilderWrapper builder, LuaSyntaxToken token, bool isVscode)
+    {
         var tokenKind = token.Kind;
         switch (tokenKind)
         {
-            case LuaTokenKind.TkIf:
-            case LuaTokenKind.TkElse:
-            case LuaTokenKind.TkElseIf:
-            case LuaTokenKind.TkEnd:
-            case LuaTokenKind.TkFor:
-            case LuaTokenKind.TkFunction:
-            case LuaTokenKind.TkIn:
-            // case LuaTokenKind.TkLocal:
-            case LuaTokenKind.TkRepeat:
-            case LuaTokenKind.TkReturn:
-            case LuaTokenKind.TkThen:
-            case LuaTokenKind.TkUntil:
-            case LuaTokenKind.TkGoto:
-            case LuaTokenKind.TkWhile:
-            case LuaTokenKind.TkBreak:
-            case LuaTokenKind.TkDo:
-            {
-                builder.Push(token.Range.ToLspRange(semanticModel.Document), SemanticTokenType.Keyword, string.Empty);
-                break;
-            }
             case LuaTokenKind.TkString:
             case LuaTokenKind.TkLongString:
             {
-                var range = token.Range.ToLspRange(semanticModel.Document);
-                if (range.Start.Line == range.End.Line)
-                {
-                    builder.Push(token.Range.ToLspRange(semanticModel.Document), SemanticTokenType.String,
-                        string.Empty);
-                }
-
+                builder.Push(token, SemanticTokenTypes.String);
                 break;
             }
-            case LuaTokenKind.TkAnd:
-            case LuaTokenKind.TkOr:
+            case LuaTokenKind.TkDocOr:
             case LuaTokenKind.TkConcat:
             case LuaTokenKind.TkEq:
             case LuaTokenKind.TkNe:
             case LuaTokenKind.TkLe:
             case LuaTokenKind.TkGe:
-            case LuaTokenKind.TkShl:
-            case LuaTokenKind.TkShr:
-            case LuaTokenKind.TkBitXor:
-            case LuaTokenKind.TkBitAnd:
-            case LuaTokenKind.TkBitOr:
-            case LuaTokenKind.TkPlus:
-            case LuaTokenKind.TkMinus:
-            case LuaTokenKind.TkMul:
-            case LuaTokenKind.TkDiv:
-            case LuaTokenKind.TkMod:
-            case LuaTokenKind.TkPow:
-            case LuaTokenKind.TkLen:
+            case LuaTokenKind.TkDocMatch:
+            case LuaTokenKind.TkLeftBracket:
+            case LuaTokenKind.TkRightBracket:
+            case LuaTokenKind.TkLeftParen:
+            case LuaTokenKind.TkRightParen:
+            case LuaTokenKind.TkLeftBrace:
+            case LuaTokenKind.TkRightBrace:
+            case LuaTokenKind.TkDots:
+            case LuaTokenKind.TkComma:
+            case LuaTokenKind.TkDot:
             {
-                builder.Push(token.Range.ToLspRange(semanticModel.Document), SemanticTokenType.Operator, string.Empty);
+                builder.Push(token, SemanticTokenTypes.Operator);
                 break;
             }
             case LuaTokenKind.TkInt:
             case LuaTokenKind.TkFloat:
             case LuaTokenKind.TkComplex:
             {
-                builder.Push(token.Range.ToLspRange(semanticModel.Document), SemanticTokenType.Number, string.Empty);
+                builder.Push(token, SemanticTokenTypes.Number);
                 break;
             }
             case LuaTokenKind.TkDocDetail:
+            case LuaTokenKind.TkUnknown:
             {
-                var range = token.Range.ToLspRange(semanticModel.Document);
-                if (range.Start.Line == range.End.Line)
-                {
-                    builder.Push(token.Range.ToLspRange(semanticModel.Document), SemanticTokenType.Comment,
-                        string.Empty);
-                }
-
+                builder.Push(token, SemanticTokenTypes.Comment);
                 break;
             }
             case LuaTokenKind.TkTypeTemplate:
             {
-                builder.Push(token.Range.ToLspRange(semanticModel.Document), SemanticTokenType.Type, string.Empty);
+                builder.Push(token, SemanticTokenTypes.String, SemanticTokenModifiers.Abstract);
                 break;
             }
-            // TODO 
-            // case LuaTokenKind.TkTagAlias:
-            // case LuaTokenKind.TkTagClass:
-            // case LuaTokenKind.TkTagEnum:
-            // case LuaTokenKind.TkTagAs:
-            // case LuaTokenKind.TkTagField:
-            // case LuaTokenKind.TkTagInterface:
-            // case LuaTokenKind.TkTagModule:
-            // {
-            //     builder.Push(token.Range.ToLspRange(semanticModel.Document), SemanticTokenType.Label, string.Empty);
-            //     break;
-            // }
+            case LuaTokenKind.TkTagAlias:
+            case LuaTokenKind.TkTagClass:
+            case LuaTokenKind.TkTagEnum:
+            case LuaTokenKind.TkTagAs:
+            case LuaTokenKind.TkTagField:
+            case LuaTokenKind.TkTagInterface:
+            case LuaTokenKind.TkTagModule:
+            case LuaTokenKind.TkTagParam:
+            case LuaTokenKind.TkTagReturn:
+            case LuaTokenKind.TkTagSee:
+            case LuaTokenKind.TkTagType:
+            case LuaTokenKind.TkTagAsync:
+            case LuaTokenKind.TkTagCast:
+            case LuaTokenKind.TkTagDeprecated:
+            case LuaTokenKind.TkTagGeneric:
+            case LuaTokenKind.TkTagNodiscard:
+            case LuaTokenKind.TkTagOperator:
+            case LuaTokenKind.TkTagOther:
+            case LuaTokenKind.TkTagOverload:
+            case LuaTokenKind.TkTagVisibility:
+            case LuaTokenKind.TkTagDiagnostic:
+            case LuaTokenKind.TkTagMeta:
+            case LuaTokenKind.TkTagVersion:
+            case LuaTokenKind.TkTagMapping:
+            case LuaTokenKind.TkDocEnumField:
+            {
+                if (!isVscode)
+                {
+                    builder.Push(token, SemanticTokenTypes.Decorator, SemanticTokenModifiers.Documentation);
+                }
+
+                break;
+            }
         }
     }
 
-    private void TokenizeNode(SemanticTokensBuilder builder, LuaSyntaxNode node, SemanticModel semanticModel,
-        CancellationToken cancellationToken)
+    private void TokenizeNode(SemanticBuilderWrapper builder, LuaSyntaxNode node)
     {
-        cancellationToken.ThrowIfCancellationRequested();
         switch (node)
         {
             case LuaDocTagClassSyntax docTagClassSyntax:
             {
                 if (docTagClassSyntax.Name is { } name)
                 {
-                    builder.Push(name.Range.ToLspRange(semanticModel.Document), SemanticTokenType.Class,
-                        SemanticTokenModifier.Declaration);
+                    builder.Push(name, SemanticTokenTypes.Class, SemanticTokenModifiers.Declaration);
                 }
 
                 break;
@@ -213,8 +255,7 @@ public class SemanticTokensAnalyzer
             {
                 if (docTagEnumSyntax.Name is { } name)
                 {
-                    builder.Push(name.Range.ToLspRange(semanticModel.Document), SemanticTokenType.Enum,
-                        SemanticTokenModifier.Declaration);
+                    builder.Push(name, SemanticTokenTypes.Enum, SemanticTokenModifiers.Declaration);
                 }
 
                 break;
@@ -223,8 +264,16 @@ public class SemanticTokensAnalyzer
             {
                 if (docTagInterfaceSyntax.Name is { } name)
                 {
-                    builder.Push(name.Range.ToLspRange(semanticModel.Document), SemanticTokenType.Interface,
-                        SemanticTokenModifier.Declaration);
+                    builder.Push(name, SemanticTokenTypes.Interface, SemanticTokenModifiers.Declaration);
+                }
+
+                break;
+            }
+            case LuaDocTagAliasSyntax docTagAliasSyntax:
+            {
+                if (docTagAliasSyntax.Name is { } name)
+                {
+                    builder.Push(name, SemanticTokenTypes.Type, SemanticTokenModifiers.Declaration);
                 }
 
                 break;
@@ -233,7 +282,7 @@ public class SemanticTokensAnalyzer
             {
                 if (nameTypeSyntax.Name is { } name)
                 {
-                    builder.Push(name.Range.ToLspRange(semanticModel.Document), SemanticTokenType.Type, string.Empty);
+                    builder.Push(name, SemanticTokenTypes.Type);
                 }
 
                 break;

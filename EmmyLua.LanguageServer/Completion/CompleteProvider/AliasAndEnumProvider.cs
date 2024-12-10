@@ -1,8 +1,10 @@
-﻿using EmmyLua.CodeAnalysis.Compilation.Declaration;
-using EmmyLua.CodeAnalysis.Compilation.Type;
+﻿using EmmyLua.CodeAnalysis.Compilation.Symbol;
 using EmmyLua.CodeAnalysis.Syntax.Kind;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
-using OmniSharp.Extensions.LanguageServer.Protocol.Models;
+using EmmyLua.CodeAnalysis.Type;
+using EmmyLua.CodeAnalysis.Type.Manager.TypeInfo;
+using EmmyLua.LanguageServer.Framework.Protocol.Message.Completion;
+
 
 namespace EmmyLua.LanguageServer.Completion.CompleteProvider;
 
@@ -44,7 +46,7 @@ public class AliasAndEnumProvider : ICompleteProviderBase
             .Count(comma => comma.Position <= trigger.Position);
 
         var prefixType = context.SemanticModel.Context.Infer(callExpr.PrefixExpr);
-        context.SemanticModel.Context.FindMethodsForType(prefixType, methodType =>
+        foreach (var methodType in context.SemanticModel.Context.FindCallableType(prefixType))
         {
             var colonDefine = methodType.ColonDefine;
             var colonCall = (callExpr.PrefixExpr as LuaIndexExprSyntax)?.IsColonIndex ?? false;
@@ -68,14 +70,14 @@ public class AliasAndEnumProvider : ICompleteProviderBase
                 var paramType = param.Type;
                 if (paramType is LuaNamedType namedType)
                 {
-                    var namedTypeKind = namedType.GetTypeKind(context.SemanticModel.Context);
-                    if (namedTypeKind == NamedTypeKind.Alias)
+                    var typeInfo = context.SemanticModel.Compilation.TypeManager.FindTypeInfo(namedType);
+                    if (typeInfo?.Kind == NamedTypeKind.Alias)
                     {
-                        AddAliasParamCompletion(namedType, context);
+                        AddAliasParamCompletion(typeInfo, context);
                     }
-                    else if (namedTypeKind == NamedTypeKind.Enum)
+                    else if (typeInfo?.Kind == NamedTypeKind.Enum)
                     {
-                        AddEnumParamCompletion(namedType, context);
+                        AddEnumParamCompletion(typeInfo, context);
                     }
                 }
                 else if (paramType is LuaAggregateType aggregateType)
@@ -87,41 +89,56 @@ public class AliasAndEnumProvider : ICompleteProviderBase
                     AddUnionTypeCompletion(unionType, context);
                 }
             }
-        });
+        }
     }
 
-    private void AddAliasParamCompletion(LuaNamedType namedType, CompleteContext context)
+    private void AddAliasParamCompletion(TypeInfo typeInfo, CompleteContext context)
     {
-        var originType = context.SemanticModel.Compilation.Db
-            .QueryAliasOriginTypes(namedType.Name);
-        if (originType is LuaAggregateType aggregateType)
+        var baseType = typeInfo.BaseType;
+        if (baseType is LuaAggregateType aggregateType)
         {
             AddAggregateTypeCompletion(aggregateType, context);
         }
-        else if (originType is LuaUnionType unionType)
+        else if (baseType is LuaUnionType unionType)
         {
             AddUnionTypeCompletion(unionType, context);
         }
     }
 
-    private void AddEnumParamCompletion(LuaNamedType namedType, CompleteContext context)
+    private void AddEnumParamCompletion(TypeInfo typeInfo, CompleteContext context)
     {
-        var members = context.SemanticModel.Compilation.Db
-            .QueryMembers(namedType);
-
-        foreach (var field in members)
+        if (typeInfo.Declarations is null)
         {
-            context.Add(new CompletionItem
+            return;
+        }
+
+        if (typeInfo.KeyEnum)
+        {
+            foreach (var field in typeInfo.Declarations.Values)
             {
-                Label = $"{namedType.Name}.{field.Name}",
-                Kind = CompletionItemKind.EnumMember,
-            });
+                context.Add(new CompletionItem
+                {
+                    Label = field.Name,
+                    Kind = CompletionItemKind.EnumMember,
+                });
+            }
+        }
+        else
+        {
+            foreach (var field in typeInfo.Declarations.Values)
+            {
+                context.Add(new CompletionItem
+                {
+                    Label = $"{typeInfo.Name}.{field.Name}",
+                    Kind = CompletionItemKind.EnumMember,
+                });
+            }
         }
     }
 
     private void AddAggregateTypeCompletion(LuaAggregateType aggregateType, CompleteContext context)
     {
-        foreach (var declaration in aggregateType.Declarations.OfType<LuaDeclaration>())
+        foreach (var declaration in aggregateType.Declarations.OfType<LuaSymbol>())
         {
             if (declaration.Info.Ptr.ToNode(context.SemanticModel.Context) is LuaDocLiteralTypeSyntax literalType)
             {
@@ -131,19 +148,20 @@ public class AliasAndEnumProvider : ICompleteProviderBase
                     detail = string.Join("\n", details.Select(d => d.RepresentText.Trim('#', '@')));
                 }
 
-                if (literalType is { IsString: true, String: { } stringLiteral })
+                if (literalType is { IsString: true, String: { Value: { } label } stringLiteral })
                 {
-                    var label = stringLiteral.RepresentText;
                     // compact emmylua old alias
-                    if (declaration.Info.DeclarationType is LuaStringLiteralType stringLiteralType
-                        && (stringLiteralType.Content.StartsWith('\'') || stringLiteralType.Content.StartsWith('"')))
-                    {
-                        label = stringLiteralType.Content;
-                    }
+                    label = label.Trim('\'', '\"');
 
                     if (context.TriggerToken is not LuaStringToken)
                     {
-                        label = $"\"{label}\"";
+                        var quote = "\'";
+                        if (stringLiteral.RepresentText.StartsWith('\"'))
+                        {
+                            quote = "\"";
+                        }
+                        
+                        label = $"{quote}{label}{quote}";
                     }
 
                     context.Add(new CompletionItem
@@ -153,7 +171,7 @@ public class AliasAndEnumProvider : ICompleteProviderBase
                         Detail = detail
                     });
                 }
-                else if (declaration.Info.DeclarationType is LuaIntegerLiteralType intLiteralType)
+                else if (declaration.Type is LuaIntegerLiteralType intLiteralType)
                 {
                     context.Add(new CompletionItem
                     {

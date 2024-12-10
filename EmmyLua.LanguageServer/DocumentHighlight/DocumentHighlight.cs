@@ -1,22 +1,20 @@
-﻿using EmmyLua.LanguageServer.Server;
-using OmniSharp.Extensions.LanguageServer.Protocol.Client.Capabilities;
-using OmniSharp.Extensions.LanguageServer.Protocol.Document;
-using OmniSharp.Extensions.LanguageServer.Protocol.Models;
+﻿using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Client.ClientCapabilities;
+using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Server;
+using EmmyLua.LanguageServer.Framework.Protocol.Message.DocumentHighlight;
+using EmmyLua.LanguageServer.Framework.Server.Handler;
+
 
 namespace EmmyLua.LanguageServer.DocumentHighlight;
 
-// TODO
-// ReSharper disable once UnusedType.Global
 public class DocumentHighlight : DocumentHighlightHandlerBase
 {
-    protected override DocumentHighlightRegistrationOptions CreateRegistrationOptions(DocumentHighlightCapability capability,
-        ClientCapabilities clientCapabilities)
+    protected override Task<DocumentHighlightResponse> Handle(DocumentHighlightParams request, CancellationToken token)
     {
-        return new();
+        throw new NotImplementedException();
     }
 
-    public override Task<DocumentHighlightContainer?> Handle(DocumentHighlightParams request, CancellationToken cancellationToken)
+    public override void RegisterCapability(ServerCapabilities serverCapabilities, ClientCapabilities clientCapabilities)
     {
-        return Task.FromResult<DocumentHighlightContainer?>(null);
+        serverCapabilities.DocumentHighlightProvider = true;
     }
 }

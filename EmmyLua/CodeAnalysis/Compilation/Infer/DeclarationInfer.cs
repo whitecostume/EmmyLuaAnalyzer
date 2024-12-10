@@ -1,12 +1,11 @@
 ﻿using EmmyLua.CodeAnalysis.Compilation.Search;
-using EmmyLua.CodeAnalysis.Compilation.Type;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
+using EmmyLua.CodeAnalysis.Type;
 
 namespace EmmyLua.CodeAnalysis.Compilation.Infer;
 
 public static class DeclarationInfer
 {
-
     public static LuaType InferLocalName(LuaLocalNameSyntax localName, SearchContext context)
     {
         var symbol = context.FindDeclaration(localName);

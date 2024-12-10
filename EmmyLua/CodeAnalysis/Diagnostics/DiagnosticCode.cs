@@ -43,7 +43,8 @@ public enum DiagnosticCode
     UndefinedField,
     [EnumMember(Value = "local-const-reassign")]
     LocalConstReassign,
-
+    [EnumMember(Value = "duplicate-type")]
+    DuplicateType,
 }
 // @formatter:on
 public static class DiagnosticCodeHelper
@@ -84,7 +85,7 @@ public static class DiagnosticCodeHelper
             DiagnosticCode.MissingReturn => true,
             DiagnosticCode.TypeNotMatch => true,
             DiagnosticCode.MissingParameter => true,
-            DiagnosticCode.InjectFieldFail => true,
+            DiagnosticCode.InjectFieldFail => false,
             DiagnosticCode.UnreachableCode => true,
             DiagnosticCode.Unused => true,
             DiagnosticCode.UndefinedGlobal => true,
@@ -97,7 +98,9 @@ public static class DiagnosticCodeHelper
             DiagnosticCode.DisableGlobalDefine => false,
             DiagnosticCode.UndefinedField => false,
             DiagnosticCode.LocalConstReassign => true,
+            DiagnosticCode.DuplicateType => true,
             _ => false
         };
     }
 }
+

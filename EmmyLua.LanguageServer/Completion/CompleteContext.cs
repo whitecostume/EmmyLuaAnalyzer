@@ -1,10 +1,11 @@
 ﻿using EmmyLua.CodeAnalysis.Compilation.Semantic;
-using EmmyLua.CodeAnalysis.Compilation.Type;
 using EmmyLua.CodeAnalysis.Syntax.Node;
+using EmmyLua.CodeAnalysis.Type;
+using EmmyLua.LanguageServer.Framework.Protocol.Message.Completion;
+using EmmyLua.LanguageServer.Framework.Protocol.Model;
 using EmmyLua.LanguageServer.Server;
 using EmmyLua.LanguageServer.Server.Render;
 using EmmyLua.LanguageServer.Util;
-using OmniSharp.Extensions.LanguageServer.Protocol.Models;
 
 namespace EmmyLua.LanguageServer.Completion;
 
@@ -25,9 +26,9 @@ public class CompleteContext
     private CancellationToken CancellationToken { get; }
 
     public CompletionConfig CompletionConfig { get; }
-    
+
     public ServerContext ServerContext { get; }
-    
+
     public LuaRenderFeature RenderFeature { get; } = new(
         true,
         false,
@@ -73,7 +74,7 @@ public class CompleteContext
     {
         return new CompletionItemBuilder(label, type ?? Builtin.Any, this);
     }
-    
+
     public SnippetBuilder CreateSnippet(string label)
     {
         return new SnippetBuilder(label, this);

@@ -1,5 +1,5 @@
 ﻿using System.Text;
-using EmmyLua.CodeAnalysis.Compilation.Declaration;
+using EmmyLua.CodeAnalysis.Compilation.Symbol;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
 
 namespace EmmyLua.LanguageServer.Server.Render.Renderer;
@@ -17,14 +17,14 @@ public static class LuaCommentRenderer
         foreach (var comment in comments)
         {
             // renderContext.AddSeparator();
-            renderContext.AppendLine();
+            renderContext.Append("\n\n");
             renderContext.Append(comment.CommentText);
         }
     }
 
-    public static void RenderDeclarationStatComment(LuaDeclaration declaration, LuaRenderContext renderContext)
+    public static void RenderDeclarationStatComment(LuaSymbol symbol, LuaRenderContext renderContext)
     {
-        var declarationElement = declaration.Info.Ptr.ToNode(renderContext.SearchContext);
+        var declarationElement = symbol.Info.Ptr.ToNode(renderContext.SearchContext);
         var comments =
             declarationElement?.AncestorsAndSelf.OfType<LuaStatSyntax>().FirstOrDefault()?.Comments;
         RenderCommentDescription(comments, renderContext);
@@ -36,9 +36,9 @@ public static class LuaCommentRenderer
         RenderCommentDescription(comments, renderContext);
     }
 
-    public static void RenderParamComment(LuaDeclaration paramDeclaration, LuaRenderContext renderContext)
+    public static void RenderParamComment(LuaSymbol paramSymbol, LuaRenderContext renderContext)
     {
-        var declarationElement = paramDeclaration.Info.Ptr.ToNode(renderContext.SearchContext);
+        var declarationElement = paramSymbol.Info.Ptr.ToNode(renderContext.SearchContext);
         var comments =
             declarationElement?.AncestorsAndSelf.OfType<LuaStatSyntax>().FirstOrDefault()?.Comments;
         if (comments is null)
@@ -49,7 +49,7 @@ public static class LuaCommentRenderer
         var tagParams = comments.SelectMany(it => it.DocList).OfType<LuaDocTagParamSyntax>();
         foreach (var tagParam in tagParams)
         {
-            if (tagParam.Name?.RepresentText == paramDeclaration.Name && tagParam.Description != null)
+            if (tagParam.Name?.RepresentText == paramSymbol.Name && tagParam.Description != null)
             {
                 // renderContext.AddSeparator();
                 renderContext.AppendLine();
@@ -126,12 +126,6 @@ public static class LuaCommentRenderer
             {
                 if (tagParam.Description is { CommentText: {} commentText })
                 {
-                    // var detailList = details.ToList();
-                    // if (detailList.Count == 0)
-                    // {
-                    //     continue;
-                    // }
-                    
                     var renderString = new StringBuilder();
                     // var nameLength = 0;
                     if (tagParam.Name is { RepresentText: { } name })
@@ -147,21 +141,6 @@ public static class LuaCommentRenderer
                     
                     // var detailIndent = " - ";
                     renderString.Append($" - {commentText}");
-                    // for (var index = 0; index < detailList.Count; index++)
-                    // {
-                    //     var detail = detailList[index];
-                    //     renderString.Append($"{detailIndent}{detail.RepresentText}");
-                    //     if (index < detailList.Count - 1)
-                    //     {
-                    //         renderString.Append("\n\n");
-                    //     }
-                    //
-                    //     if (index == 0 && detailList.Count > 1)
-                    //     {
-                    //         detailIndent = new string(' ', 7 + nameLength + 3); // 8 spaces + nameLength + 3 spaces
-                    //     }
-                    // }
-                    
                     tagRenderList.Add(renderString.ToString());
                 }
                 
@@ -169,7 +148,7 @@ public static class LuaCommentRenderer
             
             if (tagRenderList.Count > 0)
             {
-                renderContext.AppendLine();
+                renderContext.Append("\n\n");
                 foreach (var tagRender in tagRenderList)
                 {
                     renderContext.Append(tagRender);

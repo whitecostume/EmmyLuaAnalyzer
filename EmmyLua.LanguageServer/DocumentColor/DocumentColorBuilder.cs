@@ -1,10 +1,10 @@
 ﻿using System.Globalization;
 using EmmyLua.CodeAnalysis.Compilation.Semantic;
 using EmmyLua.CodeAnalysis.Document;
-using EmmyLua.CodeAnalysis.Syntax.Kind;
-using EmmyLua.CodeAnalysis.Syntax.Node;
+using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
+using EmmyLua.LanguageServer.Framework.Protocol.Message.DocumentColor;
+using EmmyLua.LanguageServer.Framework.Protocol.Model.TextEdit;
 using EmmyLua.LanguageServer.Util;
-using OmniSharp.Extensions.LanguageServer.Protocol.Models;
 
 namespace EmmyLua.LanguageServer.DocumentColor;
 
@@ -15,83 +15,119 @@ public class DocumentColorBuilder
         var colors = new List<ColorInformation>();
         var stringTokens = semanticModel
             .Document.SyntaxTree.SyntaxRoot.DescendantsWithToken
-            .OfType<LuaSyntaxToken>();
+            .OfType<LuaStringToken>();
 
         foreach (var token in stringTokens)
         {
-            if (token is { Kind: LuaTokenKind.TkString or LuaTokenKind.TkDocDetail })
-            {
-                CheckColor(token, colors, semanticModel);
-            }
+            CheckColor(token, colors, semanticModel);
         }
 
         return colors;
     }
 
-    private void CheckColor(LuaSyntaxToken token, List<ColorInformation> colors, SemanticModel semanticModel)
+    private void CheckColor(LuaStringToken token, List<ColorInformation> colors, SemanticModel semanticModel)
     {
-        var text = token.RepresentText;
-        var pos = 0;
+        var text = token.Text;
 
-        while ((pos = text.IndexOf('#', pos)) != -1)
+        for (var i = 0; i < text.Length; i++)
         {
-            var start = pos;
-            var end = pos + 7;
-            if (end > text.Length)
+            if (char.IsAsciiHexDigit(text[i]))
             {
-                return;
-            }
-
-            var sourceRange = new SourceRange()
-            {
-                StartOffset = token.Range.StartOffset + start,
-                Length = 7
-            };
-
-            var color = text.Substring(start, 7);
-
-            try
-            {
-                colors.Add(new ColorInformation()
+                var start = i;
+                var length = 1;
+                while (i + length < text.Length && char.IsAsciiHexDigit(text[i + length]))
                 {
-                    Range = sourceRange.ToLspRange(semanticModel.Document),
-                    Color = new OmniSharp.Extensions.LanguageServer.Protocol.Models.DocumentColor()
-                    {
-                        Red = int.Parse(color.Substring(1, 2), NumberStyles.HexNumber) / 255.0,
-                        Green = int.Parse(color.Substring(3, 2), NumberStyles.HexNumber) / 255.0,
-                        Blue = int.Parse(color.Substring(5, 2), NumberStyles.HexNumber) / 255.0,
-                        Alpha = 1
-                    }
-                });
-            }
-            catch (Exception)
-            {
-                // ignored
-            }
+                    length++;
+                }
 
-            pos = end;
+                if (length is 6 or 8)
+                {
+                    // 判断是否为单词边界
+                    if (start > 0 && char.IsLetterOrDigit(text[start - 1]))
+                    {
+                        continue;
+                    }
+
+                    if (start + length < text.Length && char.IsLetterOrDigit(text[start + length]))
+                    {
+                        continue;
+                    }
+
+
+                    var range = new SourceRange()
+                    {
+                        StartOffset = token.Range.StartOffset + start,
+                        Length = length
+                    };
+                    AddColorInformation(text[start..(start + length)], range, colors, semanticModel);
+                }
+
+                i += length;
+            }
         }
     }
 
-    public List<ColorPresentation> ModifyColor(ColorInformation info, SemanticModel semanticModel)
+    void AddColorInformation(ReadOnlySpan<char> colorText, SourceRange range, List<ColorInformation> colors,
+        SemanticModel semanticModel)
     {
+        if (colorText.Length == 6)
+        {
+            var red = int.Parse(colorText.Slice(0, 2), NumberStyles.HexNumber) / 255.0f;
+            var green = int.Parse(colorText.Slice(2, 2), NumberStyles.HexNumber) / 255.0f;
+            var blue = int.Parse(colorText.Slice(4, 2), NumberStyles.HexNumber) / 255.0f;
+
+            colors.Add(new ColorInformation()
+            {
+                Range = range.ToLspRange(semanticModel.Document),
+                Color = new Framework.Protocol.Message.DocumentColor.DocumentColor(red, green, blue, 1)
+            });
+        }
+        else if (colorText.Length == 8)
+        {
+            var red = int.Parse(colorText.Slice(0, 2), NumberStyles.HexNumber) / 255.0f;
+            var green = int.Parse(colorText.Slice(2, 2), NumberStyles.HexNumber) / 255.0f;
+            var blue = int.Parse(colorText.Slice(4, 2), NumberStyles.HexNumber) / 255.0f;
+            var alpha = int.Parse(colorText.Slice(6, 2), NumberStyles.HexNumber) / 255.0f;
+
+            colors.Add(new ColorInformation()
+            {
+                Range = range.ToLspRange(semanticModel.Document),
+                Color = new Framework.Protocol.Message.DocumentColor.DocumentColor(red, green, blue, alpha)
+            });
+        }
+    }
+
+    public List<ColorPresentation> ModifyColor(ColorPresentationParams info, SemanticModel semanticModel)
+    {
+        var range = info.Range;
+        var rangeLength = 0;
+        if (range is { Start: { } start, End: { } end })
+        {
+            rangeLength = end.Character - start.Character;
+        }
+
         var color = info.Color;
         var colorPresentations = new List<ColorPresentation>();
-        var r = (int) (color.Red * 255);
-        var g = (int) (color.Green * 255);
-        var b = (int) (color.Blue * 255);
-        
-        
-        var colorPresentation = new ColorPresentation()
+        var r = (int)(color.Red * 255);
+        var g = (int)(color.Green * 255);
+        var b = (int)(color.Blue * 255);
+        var a = (int)(color.Alpha * 255);
+
+        var newText = rangeLength == 6 ? $"{r:X2}{g:X2}{b:X2}" : $"{r:X2}{g:X2}{b:X2}{a:X2}";
+        if (info.Range.HasValue)
         {
-            Label = $"#{r:X2}{g:X2}{b:X2}",
-            TextEdit = new TextEdit()
+            var colorPresentation = new ColorPresentation()
             {
-                Range = info.Range,
-                NewText = $"#{r:X2}{g:X2}{b:X2}"
-            }
-        };
-        colorPresentations.Add(colorPresentation);
+                Label = $"{r:X2}{g:X2}{b:X2}",
+                TextEdit = new TextEdit()
+                {
+                    Range = info.Range.Value,
+                    NewText = newText
+                }
+            };
+            colorPresentations.Add(colorPresentation);
+        }
+
         return colorPresentations;
-    } 
+    }
 }

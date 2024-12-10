@@ -15,22 +15,35 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, target: linux-x64, platform: linux-x64 }
+          - { os: ubuntu-20.04, target: linux-x64, platform: linux-x64 }
+          # - { os: ubuntu-20.04, target: linux-musl-x64, platform: linux-x64 }
           - { os: macos-latest, target: osx-x64, platform: darwin-x64 }
           - { os: macos-latest, target: osx-arm64, platform: darwin-arm64 }
           - { os: windows-latest, target: win-x64, platform: win32-x64}
     steps:
     - uses: actions/checkout@v3
     - name: Setup .NET
-      uses: actions/setup-dotnet@v2
+      uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: 8.0.x
-    - name: Build
-      run: dotnet publish EmmyLua.LanguageServer -r ${{ matrix.target }} -c Release -o ${{ github.workspace }}/artifact/${{ matrix.platform }} --sc
+        dotnet-version: 9.0.x
+    - name: Build-Win And Linux
+      if: matrix.target == 'linux-x64' || matrix.target == 'win-x64'
+      run: dotnet publish EmmyLua.LanguageServer -r ${{ matrix.target }} -c Release -o ${{ github.workspace }}/artifact/ --sc /p:DebugType=None
+    # enable for donet9 support
+    - name: Build-Linux-Arm64
+      if: matrix.target == 'linux-musl-x64'
+      run: | 
+        dotnet tool install --global dotnet-cross
+        dotnet cross publish EmmyLua.LanguageServer -r linux-musl-x64 -c Release -o ${{ github.workspace }}/artifact/ --sc /p:DebugType=None
+    - name: Build-Maxos
+      if: matrix.target == 'osx-arm64' || matrix.target == 'osx-x64'
+      run: |
+        dotnet publish EmmyLua.LanguageServer -r ${{ matrix.target }} -c Release -o ${{ github.workspace }}/artifact/ --sc /p:DebugType=None
+        rm -rf ${{ github.workspace }}/artifact/EmmyLua.LanguageServer.dSYM
     - name: Upload
       uses: actions/upload-artifact@v3
       with: 
-        name: ${{ matrix.platform }}
+        name: EmmyLua.LanguageServer-${{ matrix.platform }}
         path: ${{ github.workspace }}/artifact/
 
   publish:
@@ -39,27 +52,32 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     steps:
     - name: Download
-      uses: actions/download-artifact@v2
+      uses: actions/download-artifact@v3
     - name: zip win32-x64
       uses: TheDoctor0/zip-release@v0.2.1
       with:
-        filename: win32-x64.zip
-        path: win32-x64
-    - name: zip linux-x64
-      uses: TheDoctor0/zip-release@v0.2.1
-      with:
-        filename: linux-x64.zip
-        path: linux-x64
+        filename: EmmyLua.LanguageServer-win32-x64.zip
+        path: EmmyLua.LanguageServer-win32-x64
+    - name: tar linux-x64
+      run: |
+        chmod +x EmmyLua.LanguageServer-linux-x64/EmmyLua.LanguageServer
+        tar -czf EmmyLua.LanguageServer-linux-x64.tar.gz -C EmmyLua.LanguageServer-linux-x64 .
+
+    # - name: tar linux-musl-x64
+    #   run: |
+    #     chmod +x EmmyLua.LanguageServer-linux-musl-x64/EmmyLua.LanguageServer
+    #     tar -czf EmmyLua.LanguageServer-linux-musl-x64.tar.gz -C EmmyLua.LanguageServer-linux-musl-x64 .
+
     - name: zip darwin-x64
       uses: TheDoctor0/zip-release@v0.2.1
       with:
-        filename: darwin-x64.zip
-        path: darwin-x64
+        filename: EmmyLua.LanguageServer-darwin-x64.zip
+        path: EmmyLua.LanguageServer-darwin-x64
     - name: zip darwin-arm64
       uses: TheDoctor0/zip-release@v0.2.1
       with:
-        filename: darwin-arm64.zip
-        path: darwin-arm64
+        filename: EmmyLua.LanguageServer-darwin-arm64.zip
+        path: EmmyLua.LanguageServer-darwin-arm64
     - name: Release
       uses: softprops/action-gh-release@v1
       with:
@@ -67,8 +85,8 @@ jobs:
         draft: false
         generate_release_notes: true
         files: |
-          linux-x64.zip
-          darwin-x64.zip
-          darwin-arm64.zip
-          win32-x64.zip
+          EmmyLua.LanguageServer-linux-x64.tar.gz
+          EmmyLua.LanguageServer-darwin-x64.zip
+          EmmyLua.LanguageServer-darwin-arm64.zip
+          EmmyLua.LanguageServer-win32-x64.zip
         token: ${{ secrets.RELEASE }}

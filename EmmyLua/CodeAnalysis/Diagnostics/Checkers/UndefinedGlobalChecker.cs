@@ -1,6 +1,6 @@
 ﻿using EmmyLua.CodeAnalysis.Compilation;
-using EmmyLua.CodeAnalysis.Compilation.Type;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
+using EmmyLua.CodeAnalysis.Type;
 
 namespace EmmyLua.CodeAnalysis.Diagnostics.Checkers;
 
@@ -38,7 +38,7 @@ public class UndefinedGlobalChecker(LuaCompilation compilation)
             .Descendants
             .OfType<LuaNameExprSyntax>();
 
-        var moduleToDocumentIds = Compilation.Workspace.ModuleManager.ModuleNameToDocumentId;
+        var moduleToDocumentIds = Compilation.Project.ModuleManager.ModuleNameToDocumentId;
         foreach (var nameExpr in nameExprs)
         {
             if (nameExpr is { Name: { RepresentText: { } name } nameToken } &&
@@ -55,7 +55,8 @@ public class UndefinedGlobalChecker(LuaCompilation compilation)
                         .Where(it =>
                         {
                             if (Compilation.Db.QueryModuleType(it) is { } ty
-                                && !ty.Equals(Builtin.Unknown) && !ty.Equals(Builtin.Nil))
+                                && !ty.IsSameType(Builtin.Unknown, context.SearchContext) &&
+                                !ty.IsSameType(Builtin.Nil, context.SearchContext))
                             {
                                 return true;
                             }
@@ -75,7 +76,7 @@ public class UndefinedGlobalChecker(LuaCompilation compilation)
 
                     if (documentIds.Count == 1)
                     {
-                        var moduleIndex = Compilation.Workspace.ModuleManager.GetModuleInfo(documentIds.First());
+                        var moduleIndex = Compilation.Project.ModuleManager.GetModuleInfo(documentIds.First());
                         if (moduleIndex is null)
                         {
                             continue;

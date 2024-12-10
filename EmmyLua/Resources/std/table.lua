@@ -88,7 +88,7 @@ function table.maxn(table) end
 --- removes the last element of list `l`.
 ---@generic V
 ---@param list table<number, V> | V[]
----@param pos number
+---@param pos? integer
 ---@return V
 function table.remove(list, pos) end
 
@@ -109,7 +109,7 @@ function table.remove(list, pos) end
 ---@overload fun(list:table):number
 ---@generic V
 ---@param list table<number, V> | V[]
----@param comp fun(a:V, b:V):boolean
+---@param comp? fun(a:V, b:V):boolean
 ---@return number
 function table.sort(list, comp) end
 
@@ -117,7 +117,7 @@ function table.sort(list, comp) end
 --- Returns the elements from the given list. This function is equivalent to
 --- return `list[i]`, `list[i+1]`, `···`, `list[j]`
 --- By default, i is 1 and j is #list.
----@generic T...
+---@generic T
 ---@param i? number
 ---@param j? number
 ---@param list [T...]
@@ -128,8 +128,9 @@ function table.unpack(list, i, j) end
 ---
 ---Returns a new table with all arguments stored into keys `1`, `2`, etc. and with a field `"n"` with the total number of arguments.
 ---
----
----@return table
+---@generic T
+---@param ... T...
+---@return [T...]
 ---@nodiscard
 function table.pack(...) end
 
@@ -141,7 +142,7 @@ function table.pack(...) end
 ---@generic T
 ---@param list any
 ---@param callback fun(key: string, value: any):T|nil
----@return T|nil
+---@return T?
 ---@deprecated
 function table.foreach(list, callback) end
 
@@ -153,7 +154,7 @@ function table.foreach(list, callback) end
 ---@generic T
 ---@param list any
 ---@param callback fun(key: string, value: any):T|nil
----@return T|nil
+---@return T?
 ---@deprecated
 function table.foreachi(list, callback) end
 

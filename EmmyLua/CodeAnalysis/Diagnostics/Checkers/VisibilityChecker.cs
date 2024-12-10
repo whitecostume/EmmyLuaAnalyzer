@@ -1,5 +1,4 @@
 ﻿using EmmyLua.CodeAnalysis.Compilation;
-using EmmyLua.CodeAnalysis.Compilation.Declaration;
 using EmmyLua.CodeAnalysis.Syntax.Node;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
 
@@ -14,7 +13,7 @@ public class VisibilityChecker(LuaCompilation compilation)
 {
     public override void Check(DiagnosticContext context)
     {
-        // var searchContext = semanticModel.Context;
+        var searchContext = context.SearchContext;
         var indexExprList = context.Document.SyntaxTree
             .SyntaxRoot.Descendants.OfType<LuaIndexExprSyntax>();
         foreach (var indexExpr in indexExprList)
@@ -24,100 +23,46 @@ public class VisibilityChecker(LuaCompilation compilation)
                 continue;
             }
 
-            var declaration = context.SearchContext.FindDeclaration(indexExpr);
-            if (declaration is null || declaration.IsPublic)
+            var symbol = context.SearchContext.FindDeclaration(indexExpr);
+            if (symbol is null || symbol.IsPublic)
             {
                 continue;
             }
 
-            if (declaration is LuaDeclaration { Info.Ptr.UniqueId: { } id } && id == indexExpr.UniqueId)
+            if (symbol is { UniqueId: { } id } && id == indexExpr.UniqueId)
             {
                 continue;
             }
 
-            var prefixExpr = indexExpr.PrefixExpr;
-            if (prefixExpr is null)
+            if (searchContext.IsVisible(indexExpr, symbol))
             {
                 continue;
             }
 
-            if (declaration.IsPackage && (declaration.DocumentId != indexExpr.DocumentId))
+            if (symbol.IsPackage)
             {
                 context.Report(
                     DiagnosticCode.AccessPackageMember,
                     $"Cannot access package member '{indexExpr.Name}'",
                     indexExpr.KeyElement.Range
                 );
-
-                continue;
             }
-
-            var envElement = FindSourceOrClosure(indexExpr);
-            if (declaration.IsPrivate)
+            else if (symbol.IsPrivate)
             {
-                if (envElement is LuaSourceSyntax || envElement.Parent is not LuaFuncStatSyntax luaFuncStat)
-                {
-                    context.Report(
-                        DiagnosticCode.AccessPrivateMember,
-                        $"Cannot access private member '{indexExpr.Name}'",
-                        indexExpr.KeyElement.Range
-                    );
-
-                    continue;
-                }
-
-                var parentType = context.SearchContext.Compilation.Db.QueryParentType(declaration.UniqueId);
-                var parentTable = context.SearchContext.Infer(luaFuncStat.IndexExpr?.PrefixExpr);
-                if (!parentTable.Equals(parentType))
-                {
-                    context.Report(
-                        DiagnosticCode.AccessPrivateMember,
-                        $"Cannot access private member '{indexExpr.Name}'",
-                        indexExpr.KeyElement.Range
-                    );
-                }
+                context.Report(
+                    DiagnosticCode.AccessPrivateMember,
+                    $"Cannot access private member '{indexExpr.Name}'",
+                    indexExpr.KeyElement.Range
+                );
             }
-            else if (declaration.IsProtected)
+            else if (symbol.IsProtected)
             {
-                if (envElement is LuaSourceSyntax || envElement.Parent is not LuaFuncStatSyntax luaFuncStat)
-                {
-                    context.Report(
-                        DiagnosticCode.AccessProtectedMember,
-                        $"Cannot access protected member '{indexExpr.Name}'",
-                        indexExpr.KeyElement.Range
-                    );
-
-                    continue;
-                }
-
-                var parentType = context.SearchContext.Compilation.Db.QueryParentType(declaration.UniqueId);
-                var parentTable = context.SearchContext.Infer(luaFuncStat.IndexExpr?.PrefixExpr);
-                if (!parentTable.SubTypeOf(parentType, context.SearchContext))
-                {
-                    context.Report(
-                        DiagnosticCode.AccessProtectedMember,
-                        $"Cannot access protected member '{indexExpr.Name}'",
-                        indexExpr.KeyElement.Range
-                    );
-                }
+                context.Report(
+                    DiagnosticCode.AccessProtectedMember,
+                    $"Cannot access protected member '{indexExpr.Name}'",
+                    indexExpr.KeyElement.Range
+                );
             }
         }
-    }
-
-    private static LuaSyntaxElement FindSourceOrClosure(LuaSyntaxElement element)
-    {
-        foreach (var ancestor in element.Ancestors)
-        {
-            if (ancestor is LuaSourceSyntax)
-            {
-                return ancestor;
-            }
-            else if (ancestor is LuaClosureExprSyntax)
-            {
-                return ancestor;
-            }
-        }
-
-        return element;
     }
 }

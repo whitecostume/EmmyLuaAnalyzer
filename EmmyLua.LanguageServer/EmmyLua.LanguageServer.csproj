@@ -2,17 +2,34 @@
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
-        <TargetFramework>net8.0</TargetFramework>
+        <TargetFramework>net9.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-<!--        <PublishAot>true</PublishAot>-->
+        <PublishAot>true</PublishAot>
+        <OptimizationPreference>Speed</OptimizationPreference>
+        <InvariantGlobalization>true</InvariantGlobalization>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)'=='Debug'">
+        <!-- 调试配置：生成PDB文件 -->
+        <DebugType>portable</DebugType>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)'=='Release'">
+        <!-- 发布配置：不生成PDB文件 -->
+        <StripSymbols>true</StripSymbols>
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\EmmyLua\EmmyLua.csproj" />
-        <PackageReference Include="OmniSharp.Extensions.LanguageServer" Version="0.19.9" />
-        <PackageReference Include="Serilog" Version="3.0.2-dev-02044" />
-        <PackageReference Include="Serilog.Sinks.Console" Version="4.2.0-dev-00918" />
+        <ProjectReference Include="..\EmmyLua\EmmyLua.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="EmmyLua.LanguageServer.Framework" Version="0.6.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Content Include="Formatting\Dll\**" CopyToOutputDirectory="PreserveNewest"/>
     </ItemGroup>
 
 </Project>

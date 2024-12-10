@@ -74,6 +74,10 @@ public enum LuaSyntaxKind : ushort
     DocNodiscard,
     DocOperator,
     DocModule,
+    DocMapping,
+    DocNamespace,
+    DocUsing,
+    DocSource,
 
     DocDetailField,
     DocBody,
@@ -92,6 +96,7 @@ public enum LuaSyntaxKind : ushort
     TypeVariadic,
     TypeExpand,
     TypeTemplate,
+    TypeMatch,
 
     // doc parameter
     TypedParameter,

@@ -6,25 +6,30 @@ public class GlobalProvider : ICompleteProviderBase
 {
     public void AddCompletion(CompleteContext context)
     {
-        if (context.TriggerToken?.Parent is not LuaNameExprSyntax)
+        if (context.TriggerToken?.Parent is LuaNameExprSyntax)
         {
-            return;
+            AddGlobalCompletion(context);
         }
+    }
 
-        var localHashSet = context.SemanticModel
-            .GetDeclarationsBefore(context.TriggerToken)
-            .Select(it => it.Name)
-            .ToHashSet();
-
-        var globals = context.SemanticModel.GetGlobals();
-        foreach (var globalDecl in globals)
+    private void AddGlobalCompletion(CompleteContext context)
+    {
+        if (context.TriggerToken is not null)
         {
-            if (!localHashSet.Contains(globalDecl.Name))
+            var localHashSet = context.SemanticModel
+                .GetDeclarationsBefore(context.TriggerToken)
+                .Select(it => it.Name)
+                .ToHashSet();
+            var globals = context.SemanticModel.GetGlobals();
+            foreach (var globalDecl in globals)
             {
-                context.CreateCompletion(globalDecl.Name, globalDecl.Type)
-                    .WithData(globalDecl.RelationInformation)
-                    .WithCheckDeclaration(globalDecl)
-                    .AddToContext();
+                if (!localHashSet.Contains(globalDecl.Name))
+                {
+                    context.CreateCompletion(globalDecl.Name, globalDecl.Type)
+                        .WithData(globalDecl.RelationInformation)
+                        .WithCheckDeclaration(globalDecl)
+                        .AddToContext();
+                }
             }
         }
     }

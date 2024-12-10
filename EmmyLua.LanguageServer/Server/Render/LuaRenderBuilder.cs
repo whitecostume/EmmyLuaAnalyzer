@@ -1,10 +1,10 @@
 ﻿using System.Globalization;
-using EmmyLua.CodeAnalysis.Compilation.Declaration;
 using EmmyLua.CodeAnalysis.Compilation.Search;
-using EmmyLua.CodeAnalysis.Compilation.Type;
+using EmmyLua.CodeAnalysis.Compilation.Symbol;
 using EmmyLua.CodeAnalysis.Document;
 using EmmyLua.CodeAnalysis.Syntax.Node;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
+using EmmyLua.CodeAnalysis.Type;
 using EmmyLua.LanguageServer.Server.Render.Renderer;
 
 namespace EmmyLua.LanguageServer.Server.Render;
@@ -54,17 +54,17 @@ public class LuaRenderBuilder(SearchContext context)
         return renderContext.GetText();
     }
 
-    public string RenderDeclaration(LuaDeclaration declaration, LuaRenderFeature feature)
+    public string RenderDeclaration(LuaSymbol symbol, LuaRenderFeature feature)
     {
         var renderContext = new LuaRenderContext(context, feature);
-        LuaDeclarationRenderer.RenderDeclaration(declaration, renderContext);
+        LuaDeclarationRenderer.RenderDeclaration(symbol, renderContext);
         return renderContext.GetText();
     }
 
     private void RenderElement(LuaSyntaxElement element, LuaRenderContext renderContext)
     {
         var declaration = renderContext.SearchContext.FindDeclaration(element);
-        if (declaration is LuaDeclaration luaDeclaration)
+        if (declaration is { } luaDeclaration)
         {
             LuaDeclarationRenderer.RenderDeclaration(luaDeclaration, renderContext);
         }
@@ -86,10 +86,10 @@ public class LuaRenderBuilder(SearchContext context)
 
                 var display = $"\"{preview}\"";
                 if (literalExpr.Parent?.Parent is LuaCallExprSyntax {Name: { } funcName}
-                    && searchContext.Compilation.Workspace.Features.RequireLikeFunction.Contains(funcName))
+                    && searchContext.Compilation.Project.Features.RequireLikeFunction.Contains(funcName))
                 {
                     renderContext.WrapperLuaAppend($"module {display}");
-                    var moduleDocument = searchContext.Compilation.Workspace.ModuleManager.FindModule(stringLiteral.Value);
+                    var moduleDocument = searchContext.Compilation.Project.ModuleManager.FindModule(stringLiteral.Value);
                     if (moduleDocument is not null)
                     {
                         LuaModuleRenderer.RenderModule(moduleDocument, renderContext);
@@ -145,7 +145,6 @@ public class LuaRenderBuilder(SearchContext context)
             if (paramSyntax.Description is { } description)
             {
                 renderContext.AppendLine();
-                // renderContext.AddSeparator();
                 renderContext.Append(description.CommentText);
             }
         }

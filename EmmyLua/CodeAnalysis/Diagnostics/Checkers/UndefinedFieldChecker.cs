@@ -1,12 +1,13 @@
 ﻿using EmmyLua.CodeAnalysis.Compilation;
-using EmmyLua.CodeAnalysis.Compilation.Type;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
+using EmmyLua.CodeAnalysis.Type;
 
 namespace EmmyLua.CodeAnalysis.Diagnostics.Checkers;
 
 public class UndefinedFieldChecker(LuaCompilation compilation)
     : DiagnosticCheckerBase(compilation, [
-        DiagnosticCode.UndefinedField
+        DiagnosticCode.UndefinedField,
+        DiagnosticCode.InjectFieldFail
     ])
 {
     public override void Check(DiagnosticContext context)
@@ -15,14 +16,26 @@ public class UndefinedFieldChecker(LuaCompilation compilation)
         foreach (var indexExpr in document.SyntaxTree.SyntaxRoot.Descendants.OfType<LuaIndexExprSyntax>())
         {
             var prefixType = context.SearchContext.Infer(indexExpr.PrefixExpr);
-            if (prefixType.Equals(Builtin.Unknown) || prefixType is LuaArrayType)
+            if (prefixType.SubTypeOf(Builtin.Unknown, context.SearchContext) || prefixType is LuaArrayType)
             {
                 continue;
             }
 
-            var declaration = context.SearchContext.FindMember(prefixType, indexExpr);
-            if (declaration.FirstOrDefault() is null && indexExpr.KeyElement is {} keyElement)
+            var luaSymbol = context.SearchContext.FindMember(prefixType, indexExpr);
+            if (luaSymbol is null && indexExpr.KeyElement is { } keyElement)
             {
+                if (indexExpr.Parent is LuaAssignStatSyntax { Assign: { } assign }
+                    && assign.Position > indexExpr.Position
+                   )
+                {
+                    context.Report(
+                        DiagnosticCode.InjectFieldFail,
+                        $"Inject field fail {indexExpr.Name}",
+                        keyElement.Range
+                    );
+                    continue;
+                }
+
                 context.Report(
                     DiagnosticCode.UndefinedField,
                     $"Undefined field {indexExpr.Name}",

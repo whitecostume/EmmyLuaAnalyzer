@@ -1,5 +1,5 @@
-﻿using EmmyLua.CodeAnalysis.Common;
-using EmmyLua.CodeAnalysis.Compilation;
+﻿using EmmyLua.CodeAnalysis.Compilation;
+using EmmyLua.CodeAnalysis.Compilation.Symbol;
 using EmmyLua.CodeAnalysis.Document;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
 
@@ -49,10 +49,10 @@ public class DeprecatedChecker(LuaCompilation compilation)
                 }
                 // case LuaTableFieldSyntax tableField:
                 // {
-                //     var declaration = context.SearchContext.FindDeclaration(tableField);
-                //     if (declaration is not null && tableField is { KeyElement.Range: { } range })
+                //     var symbol = context.SearchContext.FindDeclaration(tableField);
+                //     if (symbol is not null && tableField is { KeyElement.Range: { } range })
                 //     {
-                //         CheckDeprecated(context, declaration, range);
+                //         CheckDeprecated(context, symbol, range);
                 //     }
                 //
                 //     break;
@@ -61,9 +61,9 @@ public class DeprecatedChecker(LuaCompilation compilation)
         }
     }
 
-    private void CheckDeprecated(DiagnosticContext context, IDeclaration declaration, SourceRange range)
+    private void CheckDeprecated(DiagnosticContext context, LuaSymbol luaSymbol, SourceRange range)
     {
-        if (declaration.IsDeprecated)
+        if (luaSymbol.IsDeprecated)
         {
             context.Report(
                 DiagnosticCode.Deprecated,

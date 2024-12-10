@@ -1,5 +1,4 @@
-﻿using EmmyLua.CodeAnalysis.Common;
-using EmmyLua.CodeAnalysis.Syntax.Tree;
+﻿using EmmyLua.CodeAnalysis.Syntax.Tree;
 
 namespace EmmyLua.CodeAnalysis.Document;
 
@@ -10,7 +9,7 @@ public readonly record struct LuaDocumentId(int Id)
     public bool IsVirtual => Id == 0;
 }
 
-public sealed class LuaDocument : IDocument
+public sealed class LuaDocument
 {
     public static readonly LuaDocument Empty = new(string.Empty, LuaLanguage.Default, LuaDocumentId.VirtualDocumentId,
         string.Empty, string.Empty);
@@ -52,7 +51,8 @@ public sealed class LuaDocument : IDocument
     {
         var fileText = File.ReadAllText(path);
         var uri = new Uri(path);
-        return new LuaDocument(fileText, language, LuaDocumentId.VirtualDocumentId, uri.AbsoluteUri, uri.LocalPath);
+        return new LuaDocument(fileText, language, LuaDocumentId.VirtualDocumentId,
+            System.Uri.UnescapeDataString(uri.AbsoluteUri), path);
     }
 
     public static LuaDocument FromText(string text, LuaLanguage language)
@@ -63,13 +63,15 @@ public sealed class LuaDocument : IDocument
     public static LuaDocument FromUri(string uri, string text, LuaLanguage language)
     {
         var uri2 = new Uri(uri);
-        return new LuaDocument(text, language, LuaDocumentId.VirtualDocumentId, uri2.AbsoluteUri, uri2.LocalPath);
+        return new LuaDocument(text, language, LuaDocumentId.VirtualDocumentId,
+            System.Uri.UnescapeDataString(uri), uri2.LocalPath);
     }
 
     public static LuaDocument FromPath(string path, string text, LuaLanguage language)
     {
         var uri = new Uri(path);
-        return new LuaDocument(text, language, LuaDocumentId.VirtualDocumentId, uri.AbsoluteUri, uri.LocalPath);
+        return new LuaDocument(text, language, LuaDocumentId.VirtualDocumentId,
+            System.Uri.UnescapeDataString(uri.AbsoluteUri), path);
     }
 
     private LuaDocument(string text, LuaLanguage language, LuaDocumentId id, string uri, string path)
@@ -86,7 +88,8 @@ public sealed class LuaDocument : IDocument
 
     public LuaLocation GetLocation(SourceRange range, int baseLine = 0)
     {
-        return new LuaLocation(this, range, baseLine);
+        return new LuaLocation(GetLine(range.StartOffset) + baseLine, GetCol(range.StartOffset),
+            GetLine(range.EndOffset) + baseLine, GetCol(range.EndOffset), Uri);
     }
 
     public void ReplaceText(string text)
@@ -95,4 +98,6 @@ public sealed class LuaDocument : IDocument
         LineIndex = LineIndex.Parse(text);
         Text = text;
     }
+
+    public int TotalLine => LineIndex.TotalLine;
 }

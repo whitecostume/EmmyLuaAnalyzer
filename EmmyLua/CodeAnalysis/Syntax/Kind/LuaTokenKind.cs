@@ -111,6 +111,10 @@ public enum LuaTokenKind : ushort
     TkTagAs, // as
     TkTagNodiscard, // nodiscard
     TkTagOperator, // operator
+    TkTagMapping, // mapping
+    TkTagNamespace, // namespace
+    TkTagUsing, // using
+    TkTagSource, // source
 
     TkDocOr, // |
     TkDocContinue, // ---
@@ -120,4 +124,6 @@ public enum LuaTokenKind : ushort
     TkAt, // '@', invalid lua token, but for postfix completion
     TkVersionNumber, // version number
     TkTypeTemplate, // type template
+    TkDocMatch, // =
+    TkDocBoolean, // true false
 }

@@ -5,7 +5,7 @@ namespace EmmyLua.CodeAnalysis.Workspace.Module;
 
 public class ModuleManager
 {
-    private LuaWorkspace Workspace { get; }
+    private LuaProject Project { get; }
 
     private Dictionary<string, ModuleNode> WorkspaceModule { get; } = new();
 
@@ -13,15 +13,17 @@ public class ModuleManager
 
     public Dictionary<string, List<LuaDocumentId>> ModuleNameToDocumentId { get; } = new();
 
-    public HashSet<LuaDocumentId> VirtualDocumentIds { get; } = [];
+    private HashSet<LuaDocumentId> VirtualDocumentIds { get; } = [];
+
+    private HashSet<LuaDocumentId> DisableRequires { get; } = [];
 
     private List<Regex> Pattern { get; } = [];
 
-    private LuaFeatures Features => Workspace.Features;
+    private LuaFeatures Features => Project.Features;
 
-    public ModuleManager(LuaWorkspace luaWorkspace)
+    public ModuleManager(LuaProject luaProject)
     {
-        Workspace = luaWorkspace;
+        Project = luaProject;
         var virtualModule = new ModuleNode();
         WorkspaceModule.Add(string.Empty, virtualModule);
     }
@@ -41,7 +43,7 @@ public class ModuleManager
     {
         if (!Path.IsPathRooted(packageRoot))
         {
-            packageRoot = Path.Combine(Workspace.MainWorkspace, packageRoot);
+            packageRoot = Path.Combine(Project.MainWorkspacePath, packageRoot);
         }
 
         packageRoot = Path.GetFullPath(packageRoot);
@@ -174,7 +176,7 @@ public class ModuleManager
 
     public void AddVirtualModule(LuaDocumentId documentId, string modulePath)
     {
-        var document = Workspace.GetDocument(documentId);
+        var document = Project.GetDocument(documentId);
         if (document is null)
         {
             return;
@@ -209,15 +211,23 @@ public class ModuleManager
         root.AddModule(modulePath.Split('.'), documentId);
     }
 
+    // workaround for stupid code
+    private char[] Separators { get; } = [ '/', '\\', '.' ];
+
     public LuaDocument? FindModule(string modulePath)
     {
+        if (modulePath.IndexOfAny(Separators) != -1)
+        {
+            modulePath = modulePath.Replace(Separators[0], '.').Replace(Separators[1], '.');
+        }
+
         foreach (var moduleNode in WorkspaceModule)
         {
             var documentId = moduleNode.Value.FindModule(modulePath);
 
-            if (documentId.HasValue)
+            if (documentId.HasValue && !IsDisableRequire(documentId.Value))
             {
-                return Workspace.GetDocument(documentId.Value);
+                return Project.GetDocument(documentId.Value);
             }
         }
 
@@ -244,9 +254,9 @@ public class ModuleManager
             {
                 if (DocumentIndex.TryGetValue(documentId, out var moduleIndex))
                 {
-                    if (moduleIndex.ModulePath.EndsWith(modulePath))
+                    if (moduleIndex.ModulePath.EndsWith(modulePath) && !IsDisableRequire(documentId))
                     {
-                        return Workspace.GetDocument(documentId);
+                        return Project.GetDocument(documentId);
                     }
                 }
             }
@@ -260,7 +270,7 @@ public class ModuleManager
     public List<ModuleInfo> GetCurrentModuleNames(string modulePath)
     {
         var moduleInfos = new List<ModuleInfo>();
-        var parts = modulePath.Split('.');
+        var parts = modulePath.Split(Separators);
         if (parts.Length <= 1)
         {
             foreach (var moduleNode in WorkspaceModule)
@@ -271,7 +281,12 @@ public class ModuleManager
                     var uri = string.Empty;
                     if (child.Value.DocumentId.HasValue)
                     {
-                        var document = Workspace.GetDocument(child.Value.DocumentId.Value);
+                        if (IsDisableRequire(child.Value.DocumentId.Value))
+                        {
+                            continue;
+                        }
+
+                        var document = Project.GetDocument(child.Value.DocumentId.Value);
                         uri = document?.Uri ?? string.Empty;
                     }
 
@@ -311,7 +326,7 @@ public class ModuleManager
                     var uri = string.Empty;
                     if (child.Value.DocumentId.HasValue)
                     {
-                        var document = Workspace.GetDocument(child.Value.DocumentId.Value);
+                        var document = Project.GetDocument(child.Value.DocumentId.Value);
                         uri = document?.Uri ?? string.Empty;
                     }
 
@@ -338,5 +353,20 @@ public class ModuleManager
     {
         DocumentIndex.TryGetValue(documentId, out var moduleInfo);
         return moduleInfo;
+    }
+
+    public bool AddDisableRequire(LuaDocumentId documentId)
+    {
+        if (DisableRequires.Add(documentId))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool IsDisableRequire(LuaDocumentId documentId)
+    {
+        return DisableRequires.Contains(documentId);
     }
 }

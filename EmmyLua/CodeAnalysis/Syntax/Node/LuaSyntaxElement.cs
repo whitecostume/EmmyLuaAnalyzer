@@ -1,5 +1,4 @@
 ﻿using System.Text;
-using EmmyLua.CodeAnalysis.Common;
 using EmmyLua.CodeAnalysis.Diagnostics;
 using EmmyLua.CodeAnalysis.Document;
 using EmmyLua.CodeAnalysis.Syntax.Kind;
@@ -445,7 +444,7 @@ public abstract class LuaSyntaxElement(int index, LuaSyntaxTree tree)
         }
     }
 
-    public ILocation Location => Tree.Document.GetLocation(Range);
+    public LuaLocation Location => Tree.Document.GetLocation(Range);
 
     // 0 based line and col
     public LuaSyntaxToken? TokenAt(int line, int col)
@@ -479,7 +478,12 @@ public abstract class LuaSyntaxElement(int index, LuaSyntaxTree tree)
         }
 
         var offset = Tree.Document.GetOffset(line, col);
-        return TokenAt(offset);
+        if (offset == Tree.Document.Text.Length)
+        {
+            offset--;
+        }
+
+        return offset < 0 ? null : TokenAt(offset);
     }
 
     public LuaSyntaxNode? NodeAt(int line, int col)

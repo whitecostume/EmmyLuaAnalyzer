@@ -1,5 +1,4 @@
-﻿using EmmyLua.CodeAnalysis.Compilation.Declaration;
-using EmmyLua.CodeAnalysis.Document;
+﻿using EmmyLua.CodeAnalysis.Document;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
 
 namespace EmmyLua.LanguageServer.Server.Render.Renderer;
@@ -16,7 +15,7 @@ public static class LuaModuleRenderer
             if (exportElement is LuaNameExprSyntax nameExpr)
             {
                 var declaration =  renderContext.SearchContext.FindDeclaration(nameExpr);
-                if (declaration is LuaDeclaration luaDeclaration)
+                if (declaration is { } luaDeclaration)
                 {
                     LuaCommentRenderer.RenderDeclarationStatComment(luaDeclaration, renderContext);
                 }

@@ -1,8 +1,9 @@
-﻿using EmmyLua.LanguageServer.Server;
-using Newtonsoft.Json.Linq;
-using OmniSharp.Extensions.LanguageServer.Protocol.Client.Capabilities;
-using OmniSharp.Extensions.LanguageServer.Protocol.Document;
-using OmniSharp.Extensions.LanguageServer.Protocol.Models;
+﻿using EmmyLua.CodeAnalysis.Type;
+using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Client.ClientCapabilities;
+using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Server;
+using EmmyLua.LanguageServer.Framework.Protocol.Message.TypeHierarchy;
+using EmmyLua.LanguageServer.Framework.Server.Handler;
+using EmmyLua.LanguageServer.Server;
 
 namespace EmmyLua.LanguageServer.TypeHierarchy;
 
@@ -11,29 +12,26 @@ public class TypeHierarchyHandler(ServerContext context) : TypeHierarchyHandlerB
 {
     private TypeHierarchyBuilder Builder { get; } = new();
 
-    protected override TypeHierarchyRegistrationOptions CreateRegistrationOptions(TypeHierarchyCapability capability,
-        ClientCapabilities clientCapabilities)
-    {
-        return new()
-        {
-        };
-    }
-
-    public override Task<Container<TypeHierarchyItem>?> Handle(TypeHierarchyPrepareParams request,
+    protected override Task<TypeHierarchyResponse?> Handle(TypeHierarchyPrepareParams typeHierarchyPrepareParams,
         CancellationToken cancellationToken)
     {
-        Container<TypeHierarchyItem>? result = null;
-        var uri = request.TextDocument.Uri.ToUri().AbsoluteUri;
+        TypeHierarchyResponse? result = null;
+        var uri = typeHierarchyPrepareParams.TextDocument.Uri.UnescapeUri;
         context.ReadyRead(() =>
         {
             var semanticModel = context.GetSemanticModel(uri);
             if (semanticModel is not null)
             {
-                var node = semanticModel.Document.SyntaxTree.SyntaxRoot.NameNodeAt(request.Position.Line,
-                    request.Position.Character);
+                var node = semanticModel.Document.SyntaxTree.SyntaxRoot.NameNodeAt(
+                    typeHierarchyPrepareParams.Position.Line,
+                    typeHierarchyPrepareParams.Position.Character);
                 if (node is not null)
                 {
-                    result = Builder.BuildPrepare(semanticModel, node);
+                    var list = Builder.BuildPrepare(semanticModel, node);
+                    if (list is not null)
+                    {
+                        result = new TypeHierarchyResponse(list);
+                    }
                 }
             }
         });
@@ -41,33 +39,59 @@ public class TypeHierarchyHandler(ServerContext context) : TypeHierarchyHandlerB
         return Task.FromResult(result);
     }
 
-    public override Task<Container<TypeHierarchyItem>?> Handle(TypeHierarchySupertypesParams request,
+    protected override Task<TypeHierarchyResponse?> Handle(TypeHierarchySupertypesParams typeHierarchySupertypesParams,
         CancellationToken cancellationToken)
     {
-        Container<TypeHierarchyItem>? result = null;
+        TypeHierarchyResponse? result = null;
         context.ReadyRead(() =>
         {
-            if (request.Item.Data?.Type == JTokenType.String && request.Item.Data?.Value<string>() is { } name)
+            if (typeHierarchySupertypesParams.Item.Data?.Value is string str)
             {
-                result = Builder.BuildSupers(context.LuaWorkspace.Compilation, name);
+                var parts = str.Split('|');
+                if (parts.Length != 2)
+                {
+                    return;
+                }
+
+                if (int.TryParse(parts[0], out var id))
+                {
+                    var namedType = new LuaNamedType(new(id), parts[1]);
+                    result = new TypeHierarchyResponse(Builder.BuildSupers(context.LuaProject.Compilation, namedType));
+                }
             }
         });
 
         return Task.FromResult(result);
     }
 
-    public override Task<Container<TypeHierarchyItem>?> Handle(TypeHierarchySubtypesParams request,
+    protected override Task<TypeHierarchyResponse?> Handle(TypeHierarchySubtypesParams typeHierarchySubtypesParams,
         CancellationToken cancellationToken)
     {
-        Container<TypeHierarchyItem>? result = null;
+        TypeHierarchyResponse? result = null;
         context.ReadyRead(() =>
         {
-            if (request.Item.Data?.Type == JTokenType.String && request.Item.Data?.Value<string>() is { } name)
+            if (typeHierarchySubtypesParams.Item.Data?.Value is string str)
             {
-                result = Builder.BuildSubTypes(context.LuaWorkspace.Compilation, name);
+                var parts = str.Split('|');
+                if (parts.Length != 2)
+                {
+                    return;
+                }
+
+                if (int.TryParse(parts[0], out var id))
+                {
+                    var namedType = new LuaNamedType(new(id), parts[1]);
+                    result = new(Builder.BuildSubTypes(context.LuaProject.Compilation, namedType));
+                }
             }
         });
 
         return Task.FromResult(result);
+    }
+
+    public override void RegisterCapability(ServerCapabilities serverCapabilities,
+        ClientCapabilities clientCapabilities)
+    {
+        serverCapabilities.TypeHierarchyProvider = true;
     }
 }

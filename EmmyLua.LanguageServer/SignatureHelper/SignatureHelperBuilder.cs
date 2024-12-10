@@ -1,13 +1,13 @@
 ﻿using System.Text;
-using EmmyLua.CodeAnalysis.Compilation.Declaration;
 using EmmyLua.CodeAnalysis.Compilation.Semantic;
-using EmmyLua.CodeAnalysis.Compilation.Type;
 using EmmyLua.CodeAnalysis.Syntax.Kind;
 using EmmyLua.CodeAnalysis.Syntax.Node;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
+using EmmyLua.CodeAnalysis.Type;
+using EmmyLua.LanguageServer.Framework.Protocol.Message.SignatureHelp;
+using EmmyLua.LanguageServer.Framework.Protocol.Model.Markup;
+using EmmyLua.LanguageServer.Framework.Protocol.Model.Union;
 using EmmyLua.LanguageServer.Server.Render;
-using Microsoft.Extensions.Primitives;
-using OmniSharp.Extensions.LanguageServer.Protocol.Models;
 
 namespace EmmyLua.LanguageServer.SignatureHelper;
 
@@ -26,7 +26,7 @@ public class SignatureHelperBuilder
         var renderBuilder = new LuaRenderBuilder(semanticModel.Context);
         LuaCallExprSyntax callExpr = null!;
         LuaCallArgListSyntax callArgs = null!;
-        if (!request.Context.IsRetrigger)
+        if (!request.Context!.IsRetrigger)
         {
             if (triggerToken.Parent is not LuaCallArgListSyntax callArgs1)
             {
@@ -66,9 +66,8 @@ public class SignatureHelperBuilder
 
         var activeSignature = 0;
         var colonCall = callExpr.PrefixExpr is LuaIndexExprSyntax { IsColonIndex: true };
-
-
-        semanticModel.Context.FindMethodsForType(parentType, luaMethod =>
+        
+        foreach (var luaMethod in semanticModel.Context.FindCallableType(parentType))
         {
             var signatures = new List<LuaSignature>();
             if (luaMethod is LuaGenericMethodType genericMethodType)
@@ -96,13 +95,12 @@ public class SignatureHelperBuilder
                 renderBuilder,
                 config
             );
-        });
-
+        }
 
         return new SignatureHelp()
         {
-            ActiveParameter = activeParameter,
-            ActiveSignature = activeSignature,
+            ActiveParameter = (uint)activeParameter,
+            ActiveSignature = (uint)activeSignature,
             Signatures = signatureInfos
         };
     }
@@ -146,7 +144,7 @@ public class SignatureHelperBuilder
 
             foreach (var parameter in parameters)
             {
-                if (parameter is LuaDeclaration { Info.Ptr: { } ptr } &&
+                if (parameter is { Info.Ptr: { } ptr } &&
                     ptr.ToNode(semanticModel.Context) is { } syntaxElement)
                 {
                     parameterInfos.Add(new ParameterInformation()
@@ -184,7 +182,7 @@ public class SignatureHelperBuilder
                 sb.Append('(');
                 for (var i = 0; i < parameterInfos.Count; i++)
                 {
-                    sb.Append(parameterInfos[i].Label);
+                    sb.Append(parameterInfos[i].Label.Result1);
 
                     if (i < parameterInfos.Count - 1)
                     {
@@ -199,7 +197,7 @@ public class SignatureHelperBuilder
             {
                 for (var i = 0; i < parameterInfos.Count; i++)
                 {
-                    sb.Append(parameterInfos[i].Label);
+                    sb.Append(parameterInfos[i].Label.Result1);
 
                     if (i < parameterInfos.Count - 1)
                     {
@@ -212,7 +210,7 @@ public class SignatureHelperBuilder
             {
                 Label = sb.ToString(),
                 Parameters = parameterInfos,
-                ActiveParameter = activeParameter
+                ActiveParameter = (uint)activeParameter
             });
 
             if (activeParameter > maxActiveParameter)

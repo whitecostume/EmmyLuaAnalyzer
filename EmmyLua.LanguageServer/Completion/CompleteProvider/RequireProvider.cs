@@ -1,26 +1,30 @@
 ﻿using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
-using OmniSharp.Extensions.LanguageServer.Protocol.Models;
+using EmmyLua.LanguageServer.Framework.Protocol.Message.Completion;
+using EmmyLua.LanguageServer.Framework.Protocol.Model;
 
 namespace EmmyLua.LanguageServer.Completion.CompleteProvider;
 
 public class RequireProvider : ICompleteProviderBase
 {
+    // support stupid code
+    private char[] Separators { get; } = ['.', '/', '\\'];
+
     public void AddCompletion(CompleteContext context)
     {
         var trigger = context.TriggerToken;
         if (trigger is LuaStringToken modulePathToken
             && trigger.Parent?.Parent?.Parent is LuaCallExprSyntax { Name: { } funcName }
-            && context.SemanticModel.Compilation.Workspace.Features.RequireLikeFunction.Contains(funcName))
+            && context.SemanticModel.Compilation.Project.Features.RequireLikeFunction.Contains(funcName))
         {
             var moduleInfos =
-                context.SemanticModel.Compilation.Workspace.ModuleManager.GetCurrentModuleNames(modulePathToken.Value);
-            
+                context.SemanticModel.Compilation.Project.ModuleManager.GetCurrentModuleNames(modulePathToken.Value);
+
             var modulePath = modulePathToken.Value;
-            var parts = modulePath.Split('.');
+            var index = modulePath.LastIndexOfAny(Separators);
             var moduleBase = string.Empty;
-            if (parts.Length > 1)
+            if (index != -1)
             {
-                moduleBase = string.Join('.', parts[..^1]);
+                moduleBase = modulePath[..(index + 1)];
             }
 
             foreach (var moduleInfo in moduleInfos)
@@ -28,9 +32,9 @@ public class RequireProvider : ICompleteProviderBase
                 var filterText = moduleInfo.Name;
                 if (moduleBase.Length != 0)
                 {
-                    filterText = $"{moduleBase}.{filterText}";
+                    filterText = $"{moduleBase}{filterText}";
                 }
-                
+
                 context.Add(new CompletionItem
                 {
                     Label = moduleInfo.Name,
@@ -38,9 +42,10 @@ public class RequireProvider : ICompleteProviderBase
                     Detail = moduleInfo.Uri,
                     FilterText = filterText,
                     InsertText = filterText,
-                    Data = moduleInfo.DocumentId?.Id.ToString()
+                    Data = new LSPAny(moduleInfo.DocumentId?.Id.ToString())
                 });
             }
+
             context.StopHere();
         }
     }

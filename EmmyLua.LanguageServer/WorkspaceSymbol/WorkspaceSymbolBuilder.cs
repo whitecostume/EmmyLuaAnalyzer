@@ -1,55 +1,48 @@
 ﻿using EmmyLua.CodeAnalysis.Compilation.Search;
-using EmmyLua.CodeAnalysis.Compilation.Type;
+using EmmyLua.CodeAnalysis.Compilation.Symbol;
+using EmmyLua.CodeAnalysis.Syntax.Node;
+using EmmyLua.LanguageServer.Framework.Protocol.Message.DocumentSymbol;
 using EmmyLua.LanguageServer.Server;
 using EmmyLua.LanguageServer.Util;
-using OmniSharp.Extensions.LanguageServer.Protocol.Models;
 
 namespace EmmyLua.LanguageServer.WorkspaceSymbol;
 
 public class WorkspaceSymbolBuilder
 {
-    public List<OmniSharp.Extensions.LanguageServer.Protocol.Models.WorkspaceSymbol> Build(string query,
+    public List<Framework.Protocol.Message.WorkspaceSymbol.WorkspaceSymbol> Build(string query,
         ServerContext context, CancellationToken cancellationToken)
     {
-        var result = new List<OmniSharp.Extensions.LanguageServer.Protocol.Models.WorkspaceSymbol>();
+        var result = new List<Framework.Protocol.Message.WorkspaceSymbol.WorkspaceSymbol>();
         try
         {
-            var luaWorkspace = context.LuaWorkspace;
-            var searchContext = new SearchContext(luaWorkspace.Compilation, new SearchContextFeatures());
-            var globals = context.LuaWorkspace.Compilation.Db.QueryAllGlobal();
-            foreach (var global in globals)
+            var luaProject = context.LuaProject;
+            var searchContext = new SearchContext(luaProject.Compilation, new SearchContextFeatures());
+            var namedElements = context.LuaProject.Compilation.Db.QueryNamedElements(searchContext);
+            foreach (var pair in namedElements)
             {
-                if (global.Name.StartsWith(query, StringComparison.OrdinalIgnoreCase))
+                var name = pair.Item1;
+                if (name.StartsWith(query, StringComparison.OrdinalIgnoreCase))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var location = global.GetLocation(searchContext)?.ToLspLocation();
-                    if (location is not null)
+                    var elementIds = pair.Item2;
+                    foreach (var elementId in elementIds)
                     {
-                        result.Add(new OmniSharp.Extensions.LanguageServer.Protocol.Models.WorkspaceSymbol()
+                        var document = luaProject.GetDocument(elementId.DocumentId);
+                        if (document is not null)
                         {
-                            Name = global.Name,
-                            Kind = ToSymbolKind(global.Type),
-                            Location = location
-                        });
-                    }
-                }
-            }
-
-            var members = context.LuaWorkspace.Compilation.Db.QueryAllMembers();
-            foreach (var member in members)
-            {
-                if (member.Name.StartsWith(query, StringComparison.OrdinalIgnoreCase))
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var document = luaWorkspace.GetDocument(member.Info.Ptr.DocumentId);
-                    if (document is not null && member.Info.Ptr.ToNode(document) is { } node)
-                    {
-                        result.Add(new OmniSharp.Extensions.LanguageServer.Protocol.Models.WorkspaceSymbol()
-                        {
-                            Name = member.Name,
-                            Kind = ToSymbolKind(member.Info.DeclarationType),
-                            Location = node.Range.ToLspLocation(document)
-                        });
+                            var ptr = new LuaElementPtr<LuaSyntaxElement>(elementId);
+                            if (ptr.ToNode(document) is { } node)
+                            {
+                                var location = node.Location.ToLspLocation();
+                                var declaration = searchContext.FindDeclaration(node);
+                                result.Add(new Framework.Protocol.Message.WorkspaceSymbol.WorkspaceSymbol()
+                                {
+                                    Name = name,
+                                    Kind = ToSymbolKind(declaration),
+                                    Location = location
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -62,12 +55,13 @@ public class WorkspaceSymbolBuilder
         }
     }
 
-    private static SymbolKind ToSymbolKind(LuaType? type)
+    private static SymbolKind ToSymbolKind(LuaSymbol? luaSymbol)
     {
-        return type switch
+        return luaSymbol?.Info switch
         {
-            LuaNamedType => SymbolKind.Variable,
-            LuaMethodType => SymbolKind.Method,
+            MethodInfo => SymbolKind.Method,
+            ParamInfo => SymbolKind.TypeParameter,
+            NamedTypeInfo => SymbolKind.Class,
             _ => SymbolKind.Variable
         };
     }

@@ -11,6 +11,8 @@ public class LuaDocTagSyntax(int index, LuaSyntaxTree tree) : LuaSyntaxNode(inde
 public abstract class LuaDocTagNamedTypeSyntax(int index, LuaSyntaxTree tree) : LuaDocTagSyntax(index, tree)
 {
     public LuaNameToken? Name => FirstChild<LuaNameToken>();
+
+    public LuaDocAttributeSyntax? Attribute => FirstChild<LuaDocAttributeSyntax>();
 }
 
 public class LuaDocTagClassSyntax(int index, LuaSyntaxTree tree) : LuaDocTagNamedTypeSyntax(index, tree)
@@ -34,8 +36,6 @@ public class LuaDocGenericParamSyntax(int index, LuaSyntaxTree tree) : LuaSyntax
 public class LuaDocTagGenericSyntax(int index, LuaSyntaxTree tree) : LuaDocTagSyntax(index, tree)
 {
     public IEnumerable<LuaDocGenericParamSyntax> Params => ChildrenElement<LuaDocGenericParamSyntax>();
-
-    public bool Variadic => FirstChildToken(LuaTokenKind.TkDots) != null;
 }
 
 public class LuaDocGenericDeclareListSyntax(int index, LuaSyntaxTree tree) : LuaSyntaxNode(index, tree)
@@ -163,9 +163,31 @@ public class LuaDocTagMetaSyntax(int index, LuaSyntaxTree tree) : LuaDocTagSynta
 public class LuaDocTagModuleSyntax(int index, LuaSyntaxTree tree) : LuaDocTagSyntax(index, tree)
 {
     public LuaStringToken? Module => FirstChild<LuaStringToken>();
+
+    public LuaNameToken? Action => FirstChild<LuaNameToken>();
+}
+
+public class LuaDocTagMappingSyntax(int index, LuaSyntaxTree tree) : LuaDocTagSyntax(index, tree)
+{
+    public LuaNameToken? Name => FirstChild<LuaNameToken>();
 }
 
 public class LuaDocAttributeSyntax(int index, LuaSyntaxTree tree) : LuaDocTagSyntax(index, tree)
 {
     public IEnumerable<LuaNameToken> Attributes => ChildrenElement<LuaNameToken>();
+}
+
+public class LuaDocTagNamespaceSyntax(int index, LuaSyntaxTree tree) : LuaDocTagSyntax(index, tree)
+{
+    public LuaNameToken? Namespace => FirstChild<LuaNameToken>();
+}
+
+public class LuaDocTagUsingSyntax(int index, LuaSyntaxTree tree) : LuaDocTagSyntax(index, tree)
+{
+    public LuaNameToken? Using => FirstChild<LuaNameToken>();
+}
+
+public class LuaDocTagSourceSyntax(int index, LuaSyntaxTree tree) : LuaDocTagSyntax(index, tree)
+{
+    public LuaStringToken? Source => FirstChild<LuaStringToken>();
 }

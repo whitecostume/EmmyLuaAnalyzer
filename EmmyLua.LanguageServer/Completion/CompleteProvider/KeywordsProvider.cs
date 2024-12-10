@@ -1,8 +1,10 @@
 ﻿using EmmyLua.CodeAnalysis.Syntax.Kind;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
 using EmmyLua.LanguageServer.Completion.CompletionData;
+using EmmyLua.LanguageServer.Framework.Protocol.Message.Completion;
+using EmmyLua.LanguageServer.Framework.Protocol.Model.Kind;
+using EmmyLua.LanguageServer.Framework.Protocol.Model.TextEdit;
 using EmmyLua.LanguageServer.Util;
-using OmniSharp.Extensions.LanguageServer.Protocol.Models;
 
 namespace EmmyLua.LanguageServer.Completion.CompleteProvider;
 
@@ -18,6 +20,7 @@ public class KeywordsProvider : ICompleteProviderBase
         if (nameExpr.Parent?.Parent is LuaBlockSyntax)
         {
             context.AddRange(KeySnippets.StatKeyWords);
+            AddSmartFuncStatCompletion(context);
         }
 
         context.AddRange(KeySnippets.ExprKeywords);
@@ -43,7 +46,7 @@ public class KeywordsProvider : ICompleteProviderBase
                     InsertTextMode = InsertTextMode.AdjustIndentation,
                     InsertText = "goto continue",
                     AdditionalTextEdits = GetContinueLabelTextEdit(stat) is { } textEdit
-                        ? new TextEditContainer(textEdit)
+                        ? [textEdit]
                         : null
                 });
                 break;
@@ -51,7 +54,7 @@ public class KeywordsProvider : ICompleteProviderBase
         }
     }
 
-    private TextEdit? GetContinueLabelTextEdit(LuaStatSyntax loopStat)
+    private AnnotatedTextEdit? GetContinueLabelTextEdit(LuaStatSyntax loopStat)
     {
         var endToken = loopStat.FirstChildToken(LuaTokenKind.TkEnd);
         if (endToken is not null)
@@ -60,6 +63,11 @@ public class KeywordsProvider : ICompleteProviderBase
             var blockIndentText = string.Empty;
             if (loopStat.FirstChild<LuaBlockSyntax>()?.StatList.LastOrDefault() is { } lastStat)
             {
+                if (lastStat is LuaLabelStatSyntax { Name.Text: "continue"})
+                {
+                    return null;
+                }
+                
                 var indentToken = lastStat.GetPrevSibling();
                 if (indentToken is LuaWhitespaceToken
                     {
@@ -85,7 +93,7 @@ public class KeywordsProvider : ICompleteProviderBase
             }
 
             var newText = $"{blockIndentText}::continue::\n{endIndentText}end";
-            return new TextEdit()
+            return new()
             {
                 Range = endToken.Range.ToLspRange(document),
                 NewText = newText
@@ -93,5 +101,25 @@ public class KeywordsProvider : ICompleteProviderBase
         }
 
         return null;
+    }
+
+    private void AddSmartFuncStatCompletion(CompleteContext context)
+    {
+        var prevStat = context.TriggerToken?.Parent?.Parent?.PrevOfType<LuaStatSyntax>().FirstOrDefault();
+        if (prevStat is not LuaFuncStatSyntax funcStatSyntax)
+        {
+            return;
+        }
+
+        var indexExpr = funcStatSyntax.IndexExpr;
+        if (indexExpr is { PrefixExpr.Text: { } text, IsColonIndex: { } colonIndex })
+        {
+            var dot = colonIndex ? ":" : ".";
+            
+            context.CreateSnippet("function")
+                .WithInsertText($"function {text}{dot}${{1:name}}(${{2:...}})\n\t${0}\nend")
+                .WithDetail($" (function {text}{dot}name(...) .. end)")
+                .AddToContext();
+        }
     }
 }

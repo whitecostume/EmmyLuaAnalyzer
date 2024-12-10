@@ -1,123 +1,116 @@
 ﻿using EmmyLua.CodeAnalysis.Compilation.Search;
-using EmmyLua.CodeAnalysis.Compilation.Type;
+using EmmyLua.CodeAnalysis.Compilation.Symbol;
+using EmmyLua.CodeAnalysis.Document;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
+using EmmyLua.CodeAnalysis.Type;
 
 namespace EmmyLua.CodeAnalysis.Compilation.Infer;
 
 public static class GenericInfer
 {
-    public static void InferInstantiateByExpr(
+    public static void InferByExpr(
         LuaType type,
         LuaExprSyntax expr,
-        Dictionary<string, LuaType> genericParameter,
-        Dictionary<string, LuaType> genericReplace,
+        TypeSubstitution substitution,
+        SearchContext context)
+    {
+        if (SpecialInferByExpr(type, expr, substitution, context))
+        {
+            return;
+        }
+
+        var exprType = context.Infer(expr);
+        InferByType(type, exprType, substitution, context);
+    }
+
+    private static bool SpecialInferByExpr(
+        LuaType type,
+        LuaExprSyntax expr,
+        TypeSubstitution substitution,
         SearchContext context)
     {
         if (type is LuaTemplateType templateType && expr is LuaLiteralExprSyntax
             {
-                Literal: LuaStringToken { } stringToken
+                Literal: LuaStringToken { } stringToken1
             })
         {
-            TemplateTypeInstantiateByString(templateType, stringToken, genericParameter, genericReplace, context);
-            return;
+            substitution.Add(templateType.TemplateName,
+                new LuaNamedType(LuaDocumentId.VirtualDocumentId, templateType.PrefixName + stringToken1.Value));
+            return true;
         }
 
-        var exprType = context.InferAndUnwrap(expr);
-        InferInstantiateByType(type, exprType, genericParameter, genericReplace, context);
+        if (type is LuaGenericType { Name: "strFmt" } genericType && expr is LuaLiteralExprSyntax
+            {
+                Literal: LuaStringToken { } stringToken2
+            })
+        {
+            StrFmtInstantiateByString(genericType, stringToken2.Value, substitution, context);
+            return true;
+        }
+
+        return false;
     }
 
-    public static void InferInstantiateByExpandTypeAndExprs(
+    public static void InferByExpandTypeAndExprs(
         LuaExpandType expandType,
         IEnumerable<LuaExprSyntax> expr,
-        Dictionary<string, LuaType> genericParameter,
-        Dictionary<string, LuaType> genericReplace,
+        TypeSubstitution substitution,
         SearchContext context
     )
     {
-        InferInstantiateByExpandTypeAndTypes(expandType, expr.Select(context.InferAndUnwrap), genericParameter, genericReplace,
-            context);
+        substitution.Add(expandType.Name, new LuaMultiReturnType(expr.Select(context.Infer).ToList()));
     }
 
-    private static void InferInstantiateByExpandTypeAndTypes(
-        LuaExpandType expandType,
-        IEnumerable<LuaType> types,
-        Dictionary<string, LuaType> genericParameter,
-        Dictionary<string, LuaType> genericReplace,
-        SearchContext context
-    )
-    {
-        if (genericParameter.ContainsKey(expandType.Name))
-        {
-            genericReplace.TryAdd(expandType.Name, new LuaMultiReturnType(types.ToList()));
-        }
-    }
-
-    private static void InferInstantiateByExpandTypeAndType(
-        LuaExpandType expandType,
-        LuaType type,
-        Dictionary<string, LuaType> genericParameter,
-        Dictionary<string, LuaType> genericReplace,
-        SearchContext context
-    )
-    {
-        if (genericParameter.ContainsKey(expandType.Name))
-        {
-            genericReplace.TryAdd(expandType.Name, new LuaMultiReturnType(type));
-        }
-    }
-
-    public static void InferInstantiateByType(
-        LuaType type,
-        LuaType exprType,
-        Dictionary<string, LuaType> genericParameter,
-        Dictionary<string, LuaType> genericReplace,
+    public static void InferByType(
+        LuaType leftType,
+        LuaType rightType,
+        TypeSubstitution substitution,
         SearchContext context)
     {
-        switch (type)
+        switch (leftType)
         {
             case LuaGenericType genericType:
             {
-                GenericInstantiateByType(genericType, exprType, genericParameter, genericReplace, context);
+                GenericInstantiateByType(genericType, rightType, substitution, context);
                 break;
             }
             case LuaNamedType namedType:
             {
-                NamedTypeInstantiateByType(namedType, exprType, genericParameter, genericReplace, context);
+                substitution.Add(namedType.Name, rightType);
                 break;
             }
             case LuaArrayType arrayType:
             {
-                ArrayTypeInstantiateByType(arrayType, exprType, genericParameter, genericReplace, context);
+                ArrayTypeInstantiateByType(arrayType, rightType, substitution, context);
                 break;
             }
             case LuaMethodType methodType:
             {
-                MethodTypeInstantiateByType(methodType, exprType, genericParameter, genericReplace, context);
+                MethodTypeInstantiateByType(methodType, rightType, substitution, context);
                 break;
             }
             case LuaUnionType unionType:
             {
-                UnionTypeInstantiateByType(unionType, exprType, genericParameter, genericReplace, context);
+                UnionTypeInstantiateByType(unionType, rightType, substitution, context);
                 break;
             }
             case LuaTupleType tupleType:
             {
-                TupleTypeInstantiateByType(tupleType, exprType, genericParameter, genericReplace, context);
+                TupleTypeInstantiateByType(tupleType, rightType, substitution, context);
+                break;
+            }
+            case LuaExpandType expandType:
+            {
+                substitution.Add(expandType.Name, rightType);
                 break;
             }
         }
-    }
-
-    private static bool IsGenericParameter(string name, Dictionary<string, LuaType> genericParameter)
-    {
-        return genericParameter.ContainsKey(name);
     }
 
     private static void GenericInstantiateByType(
         LuaGenericType genericType,
         LuaType exprType,
-        Dictionary<string, LuaType> genericParameter,
-        Dictionary<string, LuaType> genericReplace,
+        TypeSubstitution substitution,
         SearchContext context)
     {
         if (exprType is LuaGenericType genericType2)
@@ -129,30 +122,26 @@ public static class GenericInfer
 
                 for (int i = 0; i < genericArgs1.Count && i < genericArgs2.Count; i++)
                 {
-                    InferInstantiateByType(genericArgs1[i], genericArgs2[i], genericParameter, genericReplace, context);
+                    InferByType(genericArgs1[i], genericArgs2[i], substitution, context);
                 }
             }
         }
-        else if (exprType is LuaTableLiteralType tableType)
+        else if (exprType is LuaElementType elementType &&
+                 elementType.ToSyntaxElement(context) is LuaTableExprSyntax tableExpr)
         {
-            if (IsGenericParameter(genericType.Name, genericParameter))
+            if (substitution.IsGenericParam(genericType.Name))
             {
-                genericReplace.TryAdd(genericType.Name, Builtin.Table);
+                substitution.Add(genericType.Name, Builtin.Table);
             }
 
-            var tableExpr = tableType.TableExprPtr.ToNode(context);
-            if (tableExpr is not null)
-            {
-                GenericTableExprInstantiate(genericType, tableExpr, genericParameter, genericReplace, context);
-            }
+            GenericTableExprInstantiate(genericType, tableExpr, substitution, context);
         }
     }
 
     private static void GenericTableExprInstantiate(
         LuaGenericType genericType,
         LuaTableExprSyntax tableExpr,
-        Dictionary<string, LuaType> genericParameter,
-        Dictionary<string, LuaType> genericReplace,
+        TypeSubstitution substitution,
         SearchContext context)
     {
         var genericArgs = genericType.GenericArgs;
@@ -166,89 +155,92 @@ public static class GenericInfer
 
         foreach (var fieldSyntax in tableExpr.FieldList)
         {
+            if (valueType is LuaUnionType { UnionTypes.Count: > 2 })
+            {
+                break;
+            }
+
             if (fieldSyntax.IsValue)
             {
-                keyType = keyType.Union(Builtin.Integer);
+                keyType = keyType.Union(Builtin.Integer, context);
             }
             else if (fieldSyntax.IsStringKey || fieldSyntax.IsNameKey)
             {
-                keyType = keyType.Union(Builtin.String);
+                keyType = keyType.Union(Builtin.String, context);
             }
 
-            var fieldValueType = context.InferAndUnwrap(fieldSyntax.Value);
-            valueType = valueType.Union(fieldValueType);
+            var fieldValueType = context.Infer(fieldSyntax.Value);
+            valueType = valueType.Union(fieldValueType, context);
         }
 
-        InferInstantiateByType(genericArgs[0], keyType, genericParameter, genericReplace, context);
-        InferInstantiateByType(genericArgs[1], valueType, genericParameter, genericReplace, context);
-    }
-
-    private static void NamedTypeInstantiateByType(
-        LuaNamedType namedType,
-        LuaType exprType,
-        Dictionary<string, LuaType> genericParameter,
-        Dictionary<string, LuaType> genericReplace,
-        SearchContext context)
-    {
-        if (IsGenericParameter(namedType.Name, genericParameter))
-        {
-            genericReplace.TryAdd(namedType.Name, exprType);
-        }
+        InferByType(genericArgs[0], keyType, substitution, context);
+        InferByType(genericArgs[1], valueType, substitution, context);
     }
 
     private static void ArrayTypeInstantiateByType(
         LuaArrayType arrayType,
         LuaType exprType,
-        Dictionary<string, LuaType> genericParameter,
-        Dictionary<string, LuaType> genericReplace,
+        TypeSubstitution substitution,
         SearchContext context)
     {
         if (exprType is LuaArrayType arrayType2)
         {
-            InferInstantiateByType(arrayType.BaseType, arrayType2.BaseType, genericParameter, genericReplace, context);
+            InferByType(arrayType.BaseType, arrayType2.BaseType, substitution, context);
         }
-        else if (exprType is LuaTableLiteralType tableLiteralType)
+        else if (exprType is LuaElementType elementType &&
+                 elementType.ToSyntaxElement(context) is LuaTableExprSyntax tableExpr)
         {
-            var tableExpr = tableLiteralType.TableExprPtr.ToNode(context);
-            if (tableExpr is not null)
-            {
-                LuaType valueType = Builtin.Unknown;
+            LuaType valueType = Builtin.Unknown;
 
-                foreach (var field in tableExpr.FieldList)
+            foreach (var field in tableExpr.FieldList)
+            {
+                if (valueType is LuaUnionType { UnionTypes.Count: > 2 })
                 {
-                    if (field.IsValue)
-                    {
-                        var fieldValueType = context.InferAndUnwrap(field.Value);
-                        valueType = valueType.Union(fieldValueType);
-                    }
+                    break;
                 }
 
-                InferInstantiateByType(arrayType.BaseType, valueType, genericParameter, genericReplace, context);
+                if (field.IsValue)
+                {
+                    var fieldValueType = context.Infer(field.Value);
+                    valueType = valueType.Union(fieldValueType, context);
+                }
             }
+
+            InferByType(arrayType.BaseType, valueType, substitution, context);
         }
     }
 
     private static void MethodTypeInstantiateByType(
         LuaMethodType methodType,
         LuaType exprType,
-        Dictionary<string, LuaType> genericParameter,
-        Dictionary<string, LuaType> genericReplace,
+        TypeSubstitution substitution,
         SearchContext context)
     {
         if (exprType is LuaMethodType methodType2)
         {
             var mainSignature = methodType.MainSignature;
             var mainSignature2 = methodType2.MainSignature;
-            for (int i = 0; i < mainSignature.Parameters.Count && i < mainSignature2.Parameters.Count; i++)
+            for (var i = 0; i < mainSignature.Parameters.Count && i < mainSignature2.Parameters.Count; i++)
             {
-                var parameter = mainSignature.Parameters[i];
-                var parameter2 = mainSignature2.Parameters[i];
-                InferInstantiateByType(parameter.Type, parameter2.Type, genericParameter, genericReplace, context);
+                var leftParamType = mainSignature.Parameters[i].Type;
+                if (leftParamType is LuaExpandType expandType)
+                {
+                    substitution.AddSpreadParameter(expandType.Name, mainSignature2.Parameters[i..]);
+                    break;
+                }
+                else if (leftParamType is not null)
+                {
+                    var rightParamType = mainSignature2.Parameters[i].Type;
+                    if (rightParamType is not null)
+                    {
+                        InferByType(leftParamType, rightParamType, substitution, context);
+                    }
+                }
             }
 
             if (mainSignature.ReturnType is { } returnType && mainSignature2.ReturnType is { } returnType2)
             {
-                InferInstantiateByType(returnType, returnType2, genericParameter, genericReplace, context);
+                InferByType(returnType, returnType2, substitution, context);
             }
         }
     }
@@ -256,20 +248,19 @@ public static class GenericInfer
     private static void UnionTypeInstantiateByType(
         LuaUnionType unionType,
         LuaType exprType,
-        Dictionary<string, LuaType> genericParameter,
-        Dictionary<string, LuaType> genericReplace,
+        TypeSubstitution substitution,
         SearchContext context)
     {
         if (unionType.UnionTypes.Contains(Builtin.Nil))
         {
-            var newType = unionType.Remove(Builtin.Nil);
-            InferInstantiateByType(newType, exprType, genericParameter, genericReplace, context);
+            var newType = unionType.Remove(Builtin.Nil, context);
+            InferByType(newType, exprType, substitution, context);
         }
 
         foreach (var luaType in unionType.UnionTypes)
         {
-            InferInstantiateByType(luaType, exprType, genericParameter, genericReplace, context);
-            if (genericParameter.Count == genericReplace.Count)
+            InferByType(luaType, exprType, substitution, context);
+            if (substitution.InferFinished)
             {
                 break;
             }
@@ -279,8 +270,7 @@ public static class GenericInfer
     private static void TupleTypeInstantiateByType(
         LuaTupleType tupleType,
         LuaType exprType,
-        Dictionary<string, LuaType> genericParameter,
-        Dictionary<string, LuaType> genericReplace,
+        TypeSubstitution substitution,
         SearchContext context)
     {
         if (exprType is LuaTupleType tupleType2)
@@ -288,18 +278,26 @@ public static class GenericInfer
             for (var i = 0; i < tupleType.TupleDeclaration.Count && i < tupleType2.TupleDeclaration.Count; i++)
             {
                 var leftElementType = tupleType.TupleDeclaration[i].Type;
+                if (leftElementType is null)
+                {
+                    continue;
+                }
+
                 if (leftElementType is LuaExpandType expandType)
                 {
-                    var rightExprs = tupleType2.TupleDeclaration[i..]
-                        .Select(it => it.Type);
-                    InferInstantiateByExpandTypeAndTypes(expandType, rightExprs, genericParameter, genericReplace,
-                        context);
+                    var rightExprTypes = tupleType2.TupleDeclaration[i..]
+                        .Select(it => it.Type)
+                        .Where(it => it is not null);
+                    substitution.Add(expandType.Name, new LuaMultiReturnType(rightExprTypes.ToList()!));
                 }
                 else
                 {
                     var rightElementType = tupleType2.TupleDeclaration[i].Type;
-                    InferInstantiateByType(leftElementType, rightElementType, genericParameter, genericReplace,
-                        context);
+                    if (rightElementType is not null)
+                    {
+                        InferByType(leftElementType, rightElementType, substitution,
+                            context);
+                    }
                 }
             }
         }
@@ -309,64 +307,126 @@ public static class GenericInfer
             foreach (var tupleElement in tupleType.TupleDeclaration)
             {
                 var leftElementType = tupleElement.Type;
+                if (leftElementType is null)
+                {
+                    continue;
+                }
+
                 if (leftElementType is LuaExpandType expandType)
                 {
-                    InferInstantiateByExpandTypeAndType(expandType, arrayElementType, genericParameter, genericReplace,
+                    substitution.Add(expandType.Name, new LuaMultiReturnType(arrayElementType));
+                    break;
+                }
+                else
+                {
+                    InferByType(leftElementType, arrayElementType, substitution,
+                        context);
+                }
+            }
+        }
+        else if (exprType is LuaElementType elementType &&
+                 elementType.ToSyntaxElement(context) is LuaTableExprSyntax tableExpr)
+        {
+            var fileList = tableExpr.FieldList.ToList();
+            for (var i = 0; i < fileList.Count && i < tupleType.TupleDeclaration.Count; i++)
+            {
+                var tupleElementType = tupleType.TupleDeclaration[i].Type;
+                if (tupleElementType is null)
+                {
+                    continue;
+                }
+
+                if (tupleElementType is LuaExpandType expandType)
+                {
+                    var fileExprs = fileList[i..]
+                        .Where(it => it is { IsValue: true, Value: not null })
+                        .Select(it => it.Value!);
+                    InferByExpandTypeAndExprs(expandType, fileExprs, substitution,
                         context);
                     break;
                 }
                 else
                 {
-                    InferInstantiateByType(leftElementType, arrayElementType, genericParameter, genericReplace,
-                        context);
-                }
-            }
-        }
-        else if (exprType is LuaTableLiteralType tableLiteralType)
-        {
-            var tableExpr = tableLiteralType.TableExprPtr.ToNode(context);
-            if (tableExpr is not null)
-            {
-                var fileList = tableExpr.FieldList.ToList();
-                for (var i = 0; i < fileList.Count && i < tupleType.TupleDeclaration.Count; i++)
-                {
-                    var tupleElementType = tupleType.TupleDeclaration[i].Type;
-                    if (tupleElementType is LuaExpandType expandType)
+                    var field = fileList[i];
+                    if (field is { IsValue: true, Value: { } valueExpr })
                     {
-                        var fileExprs = fileList[i..]
-                            .Where(it => it is { IsValue: true, Value: not null })
-                            .Select(it => it.Value!);
-                        InferInstantiateByExpandTypeAndExprs(expandType, fileExprs, genericParameter, genericReplace,
+                        InferByExpr(
+                            tupleElementType,
+                            valueExpr,
+                            substitution,
                             context);
-                        break;
-                    }
-                    else
-                    {
-                        var field = fileList[i];
-                        if (field is { IsValue: true, Value: { } valueExpr })
-                        {
-                            InferInstantiateByExpr(
-                                tupleElementType,
-                                valueExpr,
-                                genericParameter,
-                                genericReplace, context);
-                        }
                     }
                 }
             }
         }
     }
 
-    private static void TemplateTypeInstantiateByString(
-        LuaTemplateType templateType,
-        LuaStringToken stringToken,
-        Dictionary<string, LuaType> genericParameter,
-        Dictionary<string, LuaType> genericReplace,
+    private static void StrFmtInstantiateByString(
+        LuaGenericType genericType,
+        string fmt,
+        TypeSubstitution substitution,
         SearchContext context)
     {
-        if (IsGenericParameter(templateType.TemplateName, genericParameter))
+        var firstTemp = genericType.GenericArgs.FirstOrDefault();
+        if (firstTemp is not LuaNamedType templateName)
         {
-            genericReplace.TryAdd(templateType.TemplateName, new LuaNamedType(stringToken.Value));
+            return;
         }
+
+        var spreadParameter = new List<LuaSymbol>();
+        for (var i = 0; i < fmt.Length; i++)
+        {
+            var ch = fmt[i];
+            if (ch == '%')
+            {
+                if (i + 1 < fmt.Length)
+                {
+                    var nextCh = fmt[i + 1];
+                    if (nextCh == '%')
+                    {
+                        i++;
+                    }
+                    else
+                    {
+                        var index = i + 1;
+                        while (index < fmt.Length && char.IsDigit(fmt[index]))
+                        {
+                            index++;
+                        }
+
+                        if (index < fmt.Length)
+                        {
+                            var type = fmt[index];
+                            if (type is 's' or 'q')
+                            {
+                                spreadParameter.Add(new LuaSymbol(
+                                    $"%{type}",
+                                    Builtin.Any,
+                                    new VirtualInfo()
+                                ));
+                            }
+                            else if (type is 'c' or 'd' or 'i' or 'u' or 'x' or 'X' or 'o')
+                            {
+                                spreadParameter.Add(new LuaSymbol(
+                                    $"%{type}",
+                                    Builtin.Integer,
+                                    new VirtualInfo()
+                                ));
+                            }
+                            else if (type is 'A' or 'a' or 'E' or 'e' or 'f' or 'G' or 'g')
+                            {
+                                spreadParameter.Add(new LuaSymbol(
+                                    $"%{type}",
+                                    Builtin.Number,
+                                    new VirtualInfo()
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        substitution.AddSpreadParameter(templateName.Name, spreadParameter);
     }
 }

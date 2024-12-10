@@ -1,10 +1,13 @@
 ﻿using System.Text;
-using EmmyLua.CodeAnalysis.Common;
-using EmmyLua.CodeAnalysis.Compilation.Declaration;
 using EmmyLua.CodeAnalysis.Compilation.Search;
-using EmmyLua.CodeAnalysis.Compilation.Type;
+using EmmyLua.CodeAnalysis.Compilation.Symbol;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
-using OmniSharp.Extensions.LanguageServer.Protocol.Models;
+using EmmyLua.CodeAnalysis.Type;
+using EmmyLua.LanguageServer.Framework.Protocol.Message.Completion;
+using EmmyLua.LanguageServer.Framework.Protocol.Model;
+using EmmyLua.LanguageServer.Framework.Protocol.Model.Kind;
+using EmmyLua.LanguageServer.Framework.Protocol.Model.TextEdit;
+using EmmyLua.LanguageServer.Framework.Protocol.Model.Union;
 
 namespace EmmyLua.LanguageServer.Completion;
 
@@ -24,6 +27,8 @@ public class CompletionItemBuilder(string label, LuaType type, CompleteContext c
 
     private TextEditOrInsertReplaceEdit? TextOrReplaceEdit { get; set; }
 
+    private List<AnnotatedTextEdit>? AdditionalTextEdit { get; set; }
+    
     private bool Colon { get; set; } = false;
 
     private bool Disable { get; set; } = false;
@@ -46,30 +51,53 @@ public class CompletionItemBuilder(string label, LuaType type, CompleteContext c
         return this;
     }
 
-    public CompletionItemBuilder WithCheckDeclaration(IDeclaration declaration)
+    public CompletionItemBuilder WithCheckDeclaration(LuaSymbol symbol)
     {
-        if (declaration.IsDeprecated)
+        if (symbol.IsDeprecated)
         {
             IsDeprecated = true;
         }
-
-        if (declaration is LuaDeclaration luaDeclaration)
+        
+        if (symbol.RequiredVersions is not null)
         {
-            if (luaDeclaration.RequiredVersions is not null)
+            var feature = CompleteContext.ServerContext.LuaProject.Features;
+            var languageLevel = feature.Language.LanguageLevel;
+            if (!symbol.ValidateLuaVersion(languageLevel))
             {
-                var feature = CompleteContext.ServerContext.LuaWorkspace.Features;
-                var languageLevel = feature.Language.LanguageLevel;
-                if (!luaDeclaration.ValidateLuaVersion(languageLevel))
-                {
-                    Disable = true;
-                }
-
-                var frameworkVersion = feature.FrameworkVersions;
-                if (!Disable && !luaDeclaration.ValidateFrameworkVersions(frameworkVersion))
-                {
-                    Disable = true;
-                }
+                Disable = true;
             }
+
+            var frameworkVersion = feature.FrameworkVersions;
+            if (!Disable && !symbol.ValidateFrameworkVersions(frameworkVersion))
+            {
+                Disable = true;
+            }
+        }
+
+        if (symbol.Info is NamespaceInfo)
+        {
+            Kind = CompletionItemKind.Module;
+        }
+        else if (symbol.Info is NamedTypeInfo { Kind: { } kind })
+        {
+            Kind = kind switch
+            {
+                NamedTypeKind.Class => CompletionItemKind.Class,
+                NamedTypeKind.Enum => CompletionItemKind.Enum,
+                NamedTypeKind.Interface => CompletionItemKind.Interface,
+                NamedTypeKind.Alias => CompletionItemKind.Reference,
+                _ => Kind
+            };
+        }
+
+        return this;
+    }
+    
+    public CompletionItemBuilder WithCheckVisible(LuaIndexExprSyntax indexExpr,LuaSymbol symbol)
+    {
+        if (!Disable && !CompleteContext.SemanticModel.Context.IsVisible(indexExpr, symbol))
+        {
+            Disable = true;
         }
 
         return this;
@@ -104,6 +132,12 @@ public class CompletionItemBuilder(string label, LuaType type, CompleteContext c
     public CompletionItemBuilder WithCommand(Command command)
     {
         Command = command;
+        return this;
+    }
+
+    public CompletionItemBuilder WithAdditionalTextEdit(AnnotatedTextEdit textEdit)
+    {
+        AdditionalTextEdit = [textEdit];
         return this;
     }
 
@@ -148,18 +182,19 @@ public class CompletionItemBuilder(string label, LuaType type, CompleteContext c
                         LabelDetails = new CompletionItemLabelDetails()
                         {
                             Description = CompleteContext.RenderBuilder.RenderType(Type,
-                                    CompleteContext.RenderFeature),
+                                CompleteContext.RenderFeature),
                         },
                         InsertText = InsertText,
-                        Data = Data,
+                        Data = Data!,
                         Command = Command,
-                        TextEdit = TextOrReplaceEdit
+                        TextEdit = TextOrReplaceEdit,
+                        AdditionalTextEdits = AdditionalTextEdit,
                     };
                     if (IsDeprecated)
                     {
                         completionItem = completionItem with
                         {
-                            Tags = new Container<CompletionItemTag>(CompletionItemTag.Deprecated)
+                            Tags = [CompletionItemTag.Deprecated]
                         };
                     }
 
@@ -264,8 +299,10 @@ public class CompletionItemBuilder(string label, LuaType type, CompleteContext c
                 Description =
                     CompleteContext.RenderBuilder.RenderType(signature.ReturnType, CompleteContext.RenderFeature)
             },
-            Data = Data,
+            InsertText = InsertText,
+            Data = Data!,
             Command = Command,
+            AdditionalTextEdits = AdditionalTextEdit,
             TextEdit = TextOrReplaceEdit
         };
 
@@ -282,7 +319,7 @@ public class CompletionItemBuilder(string label, LuaType type, CompleteContext c
         {
             completionItem = completionItem with
             {
-                Tags = new Container<CompletionItemTag>(CompletionItemTag.Deprecated)
+                Tags = [CompletionItemTag.Deprecated]
             };
         }
 

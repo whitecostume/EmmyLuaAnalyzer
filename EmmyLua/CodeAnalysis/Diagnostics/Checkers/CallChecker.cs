@@ -1,8 +1,8 @@
-﻿using EmmyLua.CodeAnalysis.Common;
-using EmmyLua.CodeAnalysis.Compilation;
-using EmmyLua.CodeAnalysis.Compilation.Declaration;
-using EmmyLua.CodeAnalysis.Compilation.Type;
+﻿using EmmyLua.CodeAnalysis.Compilation;
+using EmmyLua.CodeAnalysis.Compilation.Symbol;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
+using EmmyLua.CodeAnalysis.Type;
+
 
 namespace EmmyLua.CodeAnalysis.Diagnostics.Checkers;
 
@@ -28,9 +28,9 @@ public class CallChecker(LuaCompilation compilation)
         }
     }
 
-    private void CheckMissingParameter(DiagnosticContext context, LuaCallExprSyntax callExpr, IDeclaration declaration)
+    private void CheckMissingParameter(DiagnosticContext context, LuaCallExprSyntax callExpr, LuaSymbol luaSymbol)
     {
-        context.SearchContext.FindMethodsForType(declaration.Type, luaMethodType =>
+        foreach (var luaMethodType in context.SearchContext.FindCallableType(luaSymbol.Type))
         {
             var args = callExpr.ArgList?.ArgList.ToList() ?? [];
             var perfectSignature = context.SearchContext.FindPerfectMatchSignature(luaMethodType, callExpr, args);
@@ -43,7 +43,7 @@ public class CallChecker(LuaCompilation compilation)
                 case (true, false):
                 {
                     var oldParameters = parameters;
-                    parameters = [new LuaDeclaration("self", new VirtualInfo(Builtin.Unknown))];
+                    parameters = [new LuaSymbol("self", Builtin.Unknown, new VirtualInfo())];
                     parameters.AddRange(oldParameters);
                     break;
                 }
@@ -65,7 +65,7 @@ public class CallChecker(LuaCompilation compilation)
                 for (var i = args.Count; i < parameters.Count; i++)
                 {
                     var parameter = parameters[i];
-                    if (parameter is LuaDeclaration { Info: ParamInfo paramInfo })
+                    if (parameter is { Info: ParamInfo paramInfo })
                     {
                         if (paramInfo.IsVararg || paramInfo.Nullable)
                         {
@@ -80,16 +80,16 @@ public class CallChecker(LuaCompilation compilation)
                     );
                 }
             }
-        });
+        }
     }
 
-    private void CheckNoDiscard(DiagnosticContext context, LuaCallExprSyntax callExpr, IDeclaration declaration)
+    private void CheckNoDiscard(DiagnosticContext context, LuaCallExprSyntax callExpr, LuaSymbol luaSymbol)
     {
-        if (callExpr.Parent is LuaCallStatSyntax && declaration.IsNoDiscard)
+        if (callExpr.Parent is LuaCallStatSyntax && luaSymbol.IsNoDiscard)
         {
             context.Report(
                 DiagnosticCode.NoDiscard,
-                $"No discard for function '{declaration.Name}'",
+                $"No discard for function '{luaSymbol.Name}'",
                 callExpr.Range
             );
         }

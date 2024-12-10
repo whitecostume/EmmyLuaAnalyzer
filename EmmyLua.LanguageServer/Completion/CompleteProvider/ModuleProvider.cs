@@ -1,10 +1,10 @@
 ﻿using EmmyLua.CodeAnalysis.Compilation.Semantic;
-using EmmyLua.CodeAnalysis.Compilation.Type;
 using EmmyLua.CodeAnalysis.Syntax.Node.SyntaxNodes;
+using EmmyLua.CodeAnalysis.Type;
 using EmmyLua.CodeAnalysis.Workspace.Module;
 using EmmyLua.CodeAnalysis.Workspace.Module.FilenameConverter;
 using EmmyLua.LanguageServer.ExecuteCommand.Commands;
-using OmniSharp.Extensions.LanguageServer.Protocol.Models;
+using EmmyLua.LanguageServer.Framework.Protocol.Message.Completion;
 
 namespace EmmyLua.LanguageServer.Completion.CompleteProvider;
 
@@ -21,14 +21,14 @@ public class ModuleProvider : ICompleteProviderBase
         {
             return;
         }
-        
+
         if (context.TriggerToken?.Parent is not LuaNameExprSyntax nameExpr)
         {
             return;
         }
 
         var semanticModel = context.SemanticModel;
-        var modules = semanticModel.Compilation.Workspace.ModuleManager.GetAllModules();
+        var modules = semanticModel.Compilation.Project.ModuleManager.GetAllModules();
         var localNames = semanticModel.GetDeclarationsBefore(context.TriggerToken).Select(it => it.Name).ToHashSet();
         foreach (var module in modules)
         {
@@ -36,7 +36,8 @@ public class ModuleProvider : ICompleteProviderBase
             {
                 var documentId = module.DocumentId;
                 var retTy = semanticModel.GetExportType(documentId) ?? Builtin.Unknown;
-                var insetText = FilenameConverter.ConvertToIdentifier(module.Name, context.CompletionConfig.AutoRequireFilenameConvention);
+                var insetText = FilenameConverter.ConvertToIdentifier(module.Name,
+                    context.CompletionConfig.AutoRequireFilenameConvention);
                 context.Add(new CompletionItem
                 {
                     Label = insetText,
@@ -56,7 +57,7 @@ public class ModuleProvider : ICompleteProviderBase
     }
 
     private bool AllowModule(
-        ModuleIndex moduleInfo, 
+        ModuleIndex moduleInfo,
         HashSet<string> localNames,
         SemanticModel semanticModel)
     {
@@ -73,6 +74,7 @@ public class ModuleProvider : ICompleteProviderBase
 
         var documentId = moduleInfo.DocumentId;
         var retTy = semanticModel.GetExportType(documentId);
-        return retTy is not null && !retTy.Equals(Builtin.Unknown) && !retTy.Equals(Builtin.Nil);
+        return retTy is not null && !retTy.IsSameType(Builtin.Unknown, semanticModel.Context) &&
+               !retTy.IsSameType(Builtin.Nil, semanticModel.Context);
     }
 }

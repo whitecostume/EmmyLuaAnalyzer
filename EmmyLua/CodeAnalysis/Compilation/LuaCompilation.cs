@@ -8,19 +8,22 @@ using EmmyLua.CodeAnalysis.Compilation.Semantic;
 using EmmyLua.CodeAnalysis.Diagnostics;
 using EmmyLua.CodeAnalysis.Document;
 using EmmyLua.CodeAnalysis.Syntax.Tree;
+using EmmyLua.CodeAnalysis.Type.Manager;
 using EmmyLua.CodeAnalysis.Workspace;
 
 namespace EmmyLua.CodeAnalysis.Compilation;
 
 public class LuaCompilation
 {
-    public LuaWorkspace Workspace { get; }
+    public LuaProject Project { get; }
 
     private readonly Dictionary<LuaDocumentId, LuaSyntaxTree> _syntaxTrees = new();
 
     public IEnumerable<LuaSyntaxTree> SyntaxTrees => _syntaxTrees.Values;
 
-    public WorkspaceIndex Db { get; }
+    public ProjectIndex Db { get; }
+
+    public LuaTypeManager TypeManager { get; }
 
     private HashSet<LuaDocumentId> DirtyDocumentIds { get; } = [];
 
@@ -30,10 +33,11 @@ public class LuaCompilation
 
     private bool DisableAnalyze { get; set; } = false;
 
-    public LuaCompilation(LuaWorkspace workspace)
+    public LuaCompilation(LuaProject project)
     {
-        Workspace = workspace;
+        Project = project;
         Db = new();
+        TypeManager = new LuaTypeManager(this);
         Analyzers =
         [
             new DeclarationAnalyzer(this),
@@ -84,6 +88,7 @@ public class LuaCompilation
         }
 
         Db.Remove(documentId);
+        TypeManager.Remove(documentId);
         Diagnostics.RemoveCache(documentId);
     }
 
@@ -94,7 +99,7 @@ public class LuaCompilation
 
     public SemanticModel? GetSemanticModel(string url)
     {
-        var document = Workspace.GetDocumentByUri(url);
+        var document = Project.GetDocumentByUri(url);
         if (document is null)
         {
             return null;
@@ -105,7 +110,7 @@ public class LuaCompilation
 
     public SemanticModel? GetSemanticModel(LuaDocumentId documentId)
     {
-        var document = Workspace.GetDocument(documentId);
+        var document = Project.GetDocument(documentId);
         if (document is null)
         {
             return null;
@@ -128,9 +133,10 @@ public class LuaCompilation
                 var documents = new List<LuaDocument>();
                 foreach (var documentId in DirtyDocumentIds)
                 {
-                    var document = Workspace.GetDocument(documentId);
-                    if (document is not null && document.Text.Length < Workspace.Features.DontIndexMaxFileSize)
+                    var document = Project.GetDocument(documentId);
+                    if (document is not null)
                     {
+                        Diagnostics.ClearDiagnostic(document.Id);
                         documents.Add(document);
                     }
                 }
@@ -138,13 +144,12 @@ public class LuaCompilation
                 var analyzeContext = new AnalyzeContext(documents);
                 foreach (var analyzer in Analyzers)
                 {
-                    Workspace.Monitor?.OnAnalyzing(analyzer.Name);
+                    Project.Monitor?.OnAnalyzing(analyzer.Name);
                     analyzer.Analyze(analyzeContext);
                 }
 
                 foreach (var document in documents)
                 {
-                    Diagnostics.ClearDiagnostic(document.Id);
                     foreach (var diagnostic in document.SyntaxTree.Diagnostics)
                     {
                         Diagnostics.AddDiagnostic(document.Id, diagnostic);
@@ -172,7 +177,7 @@ public class LuaCompilation
             new ThreadLocal<SearchContext>(() => new SearchContext(this, new SearchContextFeatures()));
         try
         {
-            var diagnosticResults = Workspace.AllDocuments
+            var diagnosticResults = Project.AllDocuments
                 .AsParallel()
                 .Select(it =>
                 {
@@ -201,7 +206,7 @@ public class LuaCompilation
     {
         var result = new List<Diagnostic>();
         var context = new SearchContext(this, new SearchContextFeatures());
-        var diagnosticResults = Workspace.AllDocuments
+        var diagnosticResults = Project.AllDocuments
             .Select(it =>
             {
                 if (Diagnostics.Check(it, context, out var documentDiagnostics))
@@ -221,7 +226,7 @@ public class LuaCompilation
 
     public IEnumerable<Diagnostic> GetDiagnostics(LuaDocumentId documentId, SearchContext context)
     {
-        var document = Workspace.GetDocument(documentId);
+        var document = Project.GetDocument(documentId);
         if (document is null)
         {
             return [];

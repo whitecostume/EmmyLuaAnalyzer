@@ -1,4 +1,5 @@
-﻿using EmmyLua.CodeAnalysis.Diagnostics;
+﻿using System.Text;
+using EmmyLua.CodeAnalysis.Diagnostics;
 using EmmyLua.CodeAnalysis.Document;
 using EmmyLua.CodeAnalysis.Document.Version;
 
@@ -16,8 +17,9 @@ public class LuaFeatures
 
     public List<FrameworkVersion> FrameworkVersions { get; set; } = [];
 
-    public HashSet<string> Extensions { get; set; } = [
-        "*.lua"
+    public HashSet<string> Includes { get; set; } =
+    [
+        "**/*.lua"
     ];
 
     public HashSet<string> ExcludeFolders { get; set; } =
@@ -27,7 +29,10 @@ public class LuaFeatures
         ".p4",
     ];
 
-    public List<string> RequirePattern { get; set; } = [
+    public HashSet<string> ExcludeGlobs { get; set; } = [];
+
+    public List<string> RequirePattern { get; set; } =
+    [
         "?/init.lua",
         "?.lua"
     ];
@@ -43,5 +48,8 @@ public class LuaFeatures
 
     public bool InitStdLib { get; set; } = true;
 
+    // Invalid config
     public int DontIndexMaxFileSize { get; set; } = 1048576; // 1MB
+
+    public Encoding Encoding { get; set; } = Encoding.UTF8;
 }
